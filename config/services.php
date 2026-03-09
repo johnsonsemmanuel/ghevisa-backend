@@ -40,6 +40,8 @@ return [
         'secret_key' => env('PAYSTACK_SECRET_KEY'),
         'webhook_secret' => env('PAYSTACK_WEBHOOK_SECRET'),
         'currency' => env('PAYSTACK_CURRENCY', 'GHS'),
+        'merchant_email' => env('PAYSTACK_MERCHANT_EMAIL', 'bluespacefinancialcloud@gmail.com'),
+        'base_url' => env('PAYSTACK_BASE_URL', 'https://api.paystack.co'),
     ],
 
     'stripe' => [

@@ -93,9 +93,10 @@ class MultiPaymentService
     ): array {
         $reference = $this->generateReference($application, 'PS');
         $channels = $method === 'paystack_mobile_money' ? ['mobile_money'] : ['card', 'bank'];
+        $baseUrl = config('services.paystack.base_url', 'https://api.paystack.co');
 
         $payload = [
-            'email' => $application->email,
+            'email' => $application->email ?: config('services.paystack.merchant_email'),
             'amount' => (int) ($amount * 100),
             'currency' => $currency,
             'reference' => $reference,
@@ -105,6 +106,10 @@ class MultiPaymentService
                 'application_id' => $application->id,
                 'reference_number' => $application->reference_number,
                 'payment_method' => $method,
+                'custom_fields' => [
+                    ['display_name' => 'Application Reference', 'variable_name' => 'application_ref', 'value' => $application->reference_number],
+                    ['display_name' => 'Applicant Name', 'variable_name' => 'applicant_name', 'value' => $application->first_name . ' ' . $application->last_name],
+                ],
             ],
         ];
 
@@ -112,12 +117,22 @@ class MultiPaymentService
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . config('services.paystack.secret_key'),
                 'Content-Type' => 'application/json',
-            ])->post('https://api.paystack.co/transaction/initialize', $payload);
+            ])->post("{$baseUrl}/transaction/initialize", $payload);
+
+            Log::info('Paystack initialize response', [
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
 
             if ($response->successful() && $response->json('status')) {
                 $data = $response->json('data');
 
                 $this->createPaymentRecord($application, $reference, 'paystack', $amount, $currency, $method);
+
+                // Update application status to pending_payment (not draft)
+                if (in_array($application->status, ['draft', 'submitted_awaiting_payment'])) {
+                    $application->update(['status' => 'pending_payment']);
+                }
 
                 return [
                     'success' => true,
@@ -127,10 +142,15 @@ class MultiPaymentService
                 ];
             }
 
+            Log::error('Paystack initialization failed', [
+                'status' => $response->status(),
+                'response' => $response->json(),
+            ]);
+
             return ['success' => false, 'message' => $response->json('message') ?? 'Payment initialization failed'];
         } catch (\Exception $e) {
-            Log::error('Paystack error: ' . $e->getMessage());
-            return ['success' => false, 'message' => 'Payment service unavailable'];
+            Log::error('Paystack error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return ['success' => false, 'message' => 'Payment service unavailable: ' . $e->getMessage()];
         }
     }
 
@@ -195,6 +215,11 @@ class MultiPaymentService
         $reference = $this->generateReference($application, 'BT');
 
         $this->createPaymentRecord($application, $reference, 'bank_transfer', $amount, $currency, 'bank_transfer');
+
+        // Update application status to pending_payment (not draft)
+        if (in_array($application->status, ['draft', 'submitted_awaiting_payment'])) {
+            $application->update(['status' => 'pending_payment']);
+        }
 
         // Bank details for manual transfer
         $bankDetails = [

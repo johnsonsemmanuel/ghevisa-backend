@@ -57,9 +57,9 @@ class GcbPaymentController extends Controller
             ], 500);
         }
 
-        // Update application status
-        if ($application->status === 'draft') {
-            $application->status = 'submitted_awaiting_payment';
+        // Update application status to pending_payment (not draft)
+        if (in_array($application->status, ['draft', 'submitted_awaiting_payment'])) {
+            $application->status = 'pending_payment';
             $application->save();
         }
 
