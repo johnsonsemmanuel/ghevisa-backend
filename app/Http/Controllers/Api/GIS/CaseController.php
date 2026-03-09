@@ -315,6 +315,7 @@ class CaseController extends Controller
         $application->update([
             'reviewed_by_id' => $request->user()->id,
             'reviewed_at' => now(),
+            'reviewing_officer_id' => $request->user()->id, // Auto-assign to reviewing officer
             'current_queue' => 'approval_queue',
         ]);
 

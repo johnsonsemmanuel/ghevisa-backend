@@ -25,6 +25,15 @@ class EVisaPdfService
         $qrCodeSvg = QrCode::format('svg')->size(160)->encoding('UTF-8')->errorCorrection('H')->generate($qrCodeText);
         $qrCodeBase64 = 'data:image/svg+xml;base64,' . base64_encode($qrCodeSvg);
 
+        // Load reviewing officer if not already loaded
+        if (!$application->relationLoaded('reviewingOfficer')) {
+            $application->load('reviewingOfficer:id,first_name,last_name');
+        }
+
+        $reviewerName = $application->reviewingOfficer 
+            ? $application->reviewingOfficer->first_name . ' ' . $application->reviewingOfficer->last_name
+            : 'N/A';
+
         $data = [
             'reference'      => $application->reference_number,
             'full_name'      => $application->first_name . ' ' . $application->last_name,
@@ -38,6 +47,8 @@ class EVisaPdfService
             'qr_code'        => $qrCodeText,
             'qr_image'       => $qrCodeBase64,
             'qr_data'        => $qrCodeText, // For backward compatibility
+            'reviewed_by'    => $reviewerName,
+            'reviewed_at'    => $application->reviewed_at ? $application->reviewed_at->format('d M Y') : null,
         ];
 
         $pdf = Pdf::loadView('pdf.evisa', $data)
