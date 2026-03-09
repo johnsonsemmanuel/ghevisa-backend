@@ -50,6 +50,7 @@ class Application extends Model
         'intended_arrival',
         'duration_days',
         'address_in_ghana',
+        'port_of_entry',
         'purpose_of_visit',
         'visited_country_1',
         'visited_country_2',

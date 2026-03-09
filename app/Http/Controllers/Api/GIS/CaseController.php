@@ -182,7 +182,7 @@ class CaseController extends Controller
         }
 
         $validated = $request->validate([
-            'message' => 'required|string|max:2000',
+            'message' => 'nullable|string|max:2000',
             'reason_code' => 'nullable|string|exists:reason_codes,code',
         ]);
 

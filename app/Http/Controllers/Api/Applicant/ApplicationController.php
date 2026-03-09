@@ -195,6 +195,7 @@ class ApplicationController extends Controller
             'intended_arrival' => 'nullable|date|after:today',
             'duration_days'    => 'nullable|integer|min:1|max:365',
             'address_in_ghana' => 'nullable|string|max:500',
+            'port_of_entry'    => 'nullable|string|max:255',
             'purpose_of_visit' => 'nullable|string|max:1000',
         ]);
 

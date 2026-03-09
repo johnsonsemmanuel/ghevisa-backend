@@ -73,10 +73,11 @@ return [
     ],
 
     'gcb' => [
-        'base_url' => env('GCB_BASE_URL', 'https://epayuat.gcbltd.com:98/paymentgateway'),
+        'base_url' => env('GCB_BASE_URL', 'https://epayuat.gcbltd.com:98/paymentgatewayapi'),
         'api_key' => env('GCB_API_KEY', ''),
         'callback_url' => env('GCB_CALLBACK_URL', ''),
         'callback_secret' => env('GCB_CALLBACK_SECRET', ''),
+        // Enable test mode by default for development - set GCB_TEST_MODE=false in .env for production
         'test_mode' => env('GCB_TEST_MODE', true),
     ],
 

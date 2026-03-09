@@ -129,11 +129,18 @@ class AuthController extends Controller
 
             \Illuminate\Support\Facades\Log::info("MFA Token for {$user->email}: {$otp}");
 
-            return response()->json([
+            $response = [
                 'message' => 'MFA required. Please check your email for the OTP.',
                 'requires_mfa' => true,
                 'email' => $user->email,
-            ]);
+            ];
+
+            // Include OTP in response for development/demo purposes
+            if (config('app.env') !== 'production') {
+                $response['dev_otp'] = $otp;
+            }
+
+            return response()->json($response);
         }
 
         $primaryRole = $user->roles->first()?->name ?? 'user';
@@ -187,7 +194,12 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        $token = $request->user()->currentAccessToken();
+        
+        // Only delete if it's an actual token (not TransientToken from cookie auth)
+        if ($token && !($token instanceof \Laravel\Sanctum\TransientToken)) {
+            $token->delete();
+        }
 
         return response()->json([
             'message' => __('auth.logged_out'),

@@ -286,16 +286,16 @@ class GcbPaymentService
     /**
      * Map GCB status code to internal status
      */
-    protected function mapStatusCode(?string $code): string
+    public function mapStatusCode(?string $code): string
     {
         return match ($code) {
             '00' => 'completed',
             '01' => 'pending',
             '02' => 'failed',
-            '03' => 'expired',
-            '04' => 'error',
-            '05' => 'error',
-            default => 'unknown',
+            '03' => 'failed',   // Checkout URL Expired
+            '04' => 'failed',   // Checkout ID not found
+            '05' => 'failed',   // Internal Error
+            default => 'pending',
         };
     }
 

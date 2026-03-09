@@ -37,7 +37,8 @@ Route::post('/webhooks/payment', [WebhookController::class, 'handlePayment'])->m
 Route::post('/gcb/callback', [\App\Http\Controllers\Api\GcbPaymentController::class, 'callback'])->middleware('throttle:60,1');
 
 // GCB Payment verification (called by frontend after redirect)
-Route::get('/gcb/verify', [\App\Http\Controllers\Api\GcbPaymentController::class, 'verify'])->middleware(['auth:sanctum', 'throttle:30,1']);
+// Higher limit to accommodate polling (max 12 requests per minute with 5s intervals)
+Route::get('/gcb/verify', [\App\Http\Controllers\Api\GcbPaymentController::class, 'verify'])->middleware(['auth:sanctum', 'throttle:120,1']);
 
 // Public: available visa types - moderate rate limiting
 Route::get('/visa-types', [ApplicationController::class, 'visaTypes'])->middleware('throttle:60,1');
@@ -161,8 +162,8 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
 
         // Payments
         Route::get('/payment-methods', [\App\Http\Controllers\Api\PaymentController::class, 'methods']);
-        Route::post('/applications/{application}/payment/initialize', [\App\Http\Controllers\Api\PaymentController::class, 'initialize'])->middleware('throttle:5,1');
-        Route::post('/payment/verify', [\App\Http\Controllers\Api\PaymentController::class, 'verify'])->middleware('throttle:10,1');
+        Route::post('/applications/{application}/payment/initialize', [\App\Http\Controllers\Api\PaymentController::class, 'initialize'])->middleware('throttle:20,1');
+        Route::post('/payment/verify', [\App\Http\Controllers\Api\PaymentController::class, 'verify'])->middleware('throttle:60,1');
         Route::post('/payment/simulate', [\App\Http\Controllers\Api\PaymentController::class, 'simulatePayment'])->middleware('throttle:3,1');
         Route::get('/applications/{application}/payments', [\App\Http\Controllers\Api\PaymentController::class, 'history']);
         Route::post('/payment/upload-proof', [\App\Http\Controllers\Api\PaymentController::class, 'uploadProof']);

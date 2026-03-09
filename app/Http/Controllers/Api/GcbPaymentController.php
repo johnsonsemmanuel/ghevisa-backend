@@ -159,10 +159,14 @@ class GcbPaymentController extends Controller
 
     /**
      * Verify payment after redirect from GCB
+     * Per GCB docs: After redirect, merchant extracts merchantRef from URL
+     * and calls Status Check API using the stored checkOutId.
+     * For test mode: use statusCode from URL query params.
      */
     public function verify(Request $request): JsonResponse
     {
         $merchantRef = $request->query('merchantRef') ?? $request->query('merchant_ref');
+        $statusCode = $request->query('statusCode') ?? $request->query('status_code');
 
         if (!$merchantRef) {
             return response()->json(['message' => 'Missing merchant reference'], 400);
@@ -174,8 +178,32 @@ class GcbPaymentController extends Controller
             return response()->json(['message' => 'Payment not found'], 404);
         }
 
-        // Check status from GCB using checkout_id
-        if ($payment->checkout_id) {
+        // If already completed, just return success
+        if ($payment->status === 'completed') {
+            return response()->json([
+                'success' => true,
+                'status' => 'completed',
+                'application_id' => $payment->application_id,
+                'reference_number' => $payment->application->reference_number ?? null,
+                'message' => 'Payment successful! Your application has been submitted.',
+            ]);
+        }
+
+        // For test mode payments: use statusCode from URL redirect
+        if ($payment->payment_provider === 'gcb_test' && $statusCode !== null) {
+            $status = $this->gcbService->mapStatusCode($statusCode);
+            $payment->update([
+                'status' => $status === 'completed' ? 'completed' : ($status === 'pending' ? 'pending' : 'failed'),
+                'paid_at' => $status === 'completed' ? now() : null,
+                'completed_at' => $status === 'completed' ? now() : null,
+            ]);
+
+            if ($status === 'completed') {
+                $this->handlePaymentSuccess($payment);
+            }
+        }
+        // For real GCB payments: call Status Check API using checkOutId
+        elseif ($payment->checkout_id && $payment->payment_provider === 'gcb') {
             $result = $this->gcbService->checkTransactionStatus($payment->checkout_id);
 
             if ($result['success']) {
@@ -198,7 +226,7 @@ class GcbPaymentController extends Controller
             'success' => $payment->status === 'completed',
             'status' => $payment->status,
             'application_id' => $payment->application_id,
-            'reference_number' => $payment->application->reference_number,
+            'reference_number' => $payment->application->reference_number ?? null,
             'message' => $payment->status === 'completed' 
                 ? 'Payment successful! Your application has been submitted.'
                 : 'Payment ' . $payment->status,

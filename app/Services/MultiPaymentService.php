@@ -71,18 +71,30 @@ class MultiPaymentService
         string $currency = 'GHS',
         ?string $callbackUrl = null
     ): array {
-        // HIGH-06: Idempotency — reject if a pending payment already exists
+        // HIGH-06: Idempotency — if a recent pending payment exists, return it instead of creating new one
         $existingPending = Payment::where('application_id', $application->id)
             ->where('status', 'pending')
             ->where('created_at', '>=', now()->subMinutes(30))
             ->first();
 
         if ($existingPending) {
-            return [
-                'success' => false,
-                'message' => 'A pending payment already exists for this application. Please complete or wait for it to expire.',
-                'existing_reference' => $existingPending->transaction_reference,
-            ];
+            // Return existing payment details so user can complete it
+            // Check if we have stored authorization URL in metadata
+            $authUrl = $existingPending->metadata['authorization_url'] ?? null;
+            
+            if ($authUrl) {
+                return [
+                    'success' => true,
+                    'provider' => $existingPending->payment_provider,
+                    'authorization_url' => $authUrl,
+                    'reference' => $existingPending->transaction_reference,
+                    'existing' => true,
+                    'message' => 'Resuming existing payment session.',
+                ];
+            }
+            
+            // If no auth URL stored, mark old payment as failed and create new one
+            $existingPending->update(['status' => 'failed']);
         }
 
         // Also reject if already paid
@@ -122,24 +134,17 @@ class MultiPaymentService
         $channels = $method === 'paystack_mobile_money' ? ['mobile_money'] : ['card', 'bank'];
         $baseUrl = config('services.paystack.base_url', 'https://api.paystack.co');
 
-        // Handle currency conversion for Paystack
-        // If USD is requested, convert to GHS for Paystack (test keys may only support GHS)
-        // If GHS is requested, use it directly
-        $paystackCurrency = $currency;
-        $paystackAmount = $amount;
-        
-        if ($currency === 'USD') {
-            // Try USD first, but if merchant doesn't support it, we'll convert to GHS
-            // The test keys typically only support GHS
-            $paystackCurrency = 'GHS';
+        // Always use GHS for Paystack - convert if needed
+        $ghsAmount = $amount;
+        if ($currency !== 'GHS') {
             $ghsRate = config('services.exchange_rates.GHS', 12.5);
-            $paystackAmount = $amount * $ghsRate; // Convert USD to GHS
+            $ghsAmount = $amount * $ghsRate;
         }
 
         $payload = [
             'email' => $application->email ?: config('services.paystack.merchant_email'),
-            'amount' => (int) ($paystackAmount * 100),
-            'currency' => $paystackCurrency,
+            'amount' => (int) round($ghsAmount * 100), // Paystack expects amount in pesewas
+            'currency' => 'GHS',
             'reference' => $reference,
             'callback_url' => $callbackUrl ?? config('app.frontend_url') . '/payment/callback',
             'channels' => $channels,
@@ -155,6 +160,8 @@ class MultiPaymentService
         ];
 
         try {
+            Log::info('Paystack initialize request', ['payload' => array_merge($payload, ['amount_ghs' => $ghsAmount])]);
+
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . config('services.paystack.secret_key'),
                 'Content-Type' => 'application/json',
@@ -168,10 +175,12 @@ class MultiPaymentService
             if ($response->successful() && $response->json('status')) {
                 $data = $response->json('data');
 
-                // Store the original currency and amount (what user selected)
-                $this->createPaymentRecord($application, $reference, 'paystack', $amount, $currency, $method);
+                $this->createPaymentRecord($application, $reference, 'paystack', $ghsAmount, 'GHS', $method, [
+                    'authorization_url' => $data['authorization_url'],
+                    'access_code' => $data['access_code'] ?? null,
+                ]);
 
-                // Update application status to pending_payment (not draft)
+                // Update application status to pending_payment
                 if (in_array($application->status, ['draft', 'submitted_awaiting_payment'])) {
                     $application->update(['status' => 'pending_payment']);
                 }
@@ -354,9 +363,18 @@ class MultiPaymentService
     protected function verifyPaystack(string $reference, Payment $payment): array
     {
         try {
+            Log::info('Paystack verification starting', ['reference' => $reference, 'payment_id' => $payment->id]);
+            
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . config('services.paystack.secret_key'),
             ])->get("https://api.paystack.co/transaction/verify/{$reference}");
+
+            Log::info('Paystack verification response', [
+                'status_code' => $response->status(),
+                'successful' => $response->successful(),
+                'json_status' => $response->json('status'),
+                'data_status' => $response->json('data.status'),
+            ]);
 
             if ($response->successful() && $response->json('status')) {
                 $data = $response->json('data');
@@ -370,13 +388,17 @@ class MultiPaymentService
 
                     $this->onPaymentSuccess($payment);
 
+                    Log::info('Paystack payment verified successfully', ['payment_id' => $payment->id]);
                     return ['success' => true, 'status' => 'completed', 'payment' => $payment->fresh()];
                 }
+                
+                Log::warning('Paystack payment not successful', ['data_status' => $data['status']]);
             }
 
+            Log::warning('Paystack verification failed', ['response' => $response->body()]);
             return ['success' => false, 'status' => $payment->status];
         } catch (\Exception $e) {
-            Log::error('Paystack verify error: ' . $e->getMessage());
+            Log::error('Paystack verify error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return ['success' => false, 'status' => 'verification_failed'];
         }
     }
@@ -426,8 +448,8 @@ class MultiPaymentService
 
     /**
      * Handle successful payment.
-     * Transitions: submitted_awaiting_payment/pending_payment → paid_submitted
-     * Routing is NOT triggered here — it is handled separately.
+     * Transitions: submitted_awaiting_payment/pending_payment → paid_submitted → submitted → under_review
+     * Automatically routes the application to GIS/MFA for review.
      */
     protected function onPaymentSuccess(Payment $payment): void
     {
@@ -448,9 +470,30 @@ class MultiPaymentService
         // Store total fee
         $application->update(['total_fee' => $payment->amount]);
 
+        $applicationService = app(ApplicationService::class);
+
         // Use centralized ApplicationService for proper status transition + audit trail
         if (in_array($application->status, ['submitted_awaiting_payment', 'pending_payment'])) {
-            app(ApplicationService::class)->confirmPayment($application);
+            $applicationService->confirmPayment($application);
+            $application->refresh();
+        }
+
+        // After payment confirmation, submit the application for routing to GIS/MFA
+        if ($application->status === 'paid_submitted') {
+            try {
+                $applicationService->submit($application);
+                Log::info('Application automatically submitted after payment', [
+                    'application_id' => $application->id,
+                    'reference' => $application->reference_number,
+                    'new_status' => $application->fresh()->status,
+                    'assigned_to' => $application->fresh()->assigned_agency,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to submit application after payment', [
+                    'application_id' => $application->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         Log::info("Payment completed for application {$application->reference_number}");
@@ -465,7 +508,8 @@ class MultiPaymentService
         string $provider,
         float $amount,
         string $currency,
-        string $method
+        string $method,
+        array $extraMetadata = []
     ): Payment {
         return Payment::create([
             'application_id' => $application->id,
@@ -475,7 +519,7 @@ class MultiPaymentService
             'amount' => $amount,
             'currency' => $currency,
             'status' => 'pending',
-            'metadata' => ['payment_method' => $method],
+            'metadata' => array_merge(['payment_method' => $method], $extraMetadata),
         ]);
     }
 
@@ -490,7 +534,7 @@ class MultiPaymentService
         $amountUsd = $pricing['total'];
 
         // HIGH-05: Use configurable exchange rates from config/exchange_rates.php
-        $rates = config('exchange_rates', ['USD' => 1, 'GHS' => 12.5, 'EUR' => 0.92, 'GBP' => 0.79]);
+        $rates = config('services.exchange_rates', ['USD' => 1, 'GHS' => 12.5, 'EUR' => 0.92, 'GBP' => 0.79]);
         $rate = $rates[$currency] ?? 1;
 
         return round($amountUsd * $rate, 2);

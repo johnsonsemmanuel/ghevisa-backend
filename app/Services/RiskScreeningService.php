@@ -234,6 +234,15 @@ class RiskScreeningService
         $nationality = $this->getDecryptedField($application, 'nationality_encrypted');
         $dob = $application->date_of_birth;
 
+        // Convert string to DateTime if needed
+        if ($dob && is_string($dob)) {
+            try {
+                $dob = new \DateTime($dob);
+            } catch (\Exception $e) {
+                $dob = null;
+            }
+        }
+
         return Watchlist::checkMatch($firstName, $lastName, $passportNumber, $nationality, $dob);
     }
 
