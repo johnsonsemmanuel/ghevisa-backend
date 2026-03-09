@@ -10,6 +10,10 @@ use Illuminate\Support\Str;
 
 class DocumentService
 {
+    public function __construct(
+        protected FileSecurityService $fileSecurityService
+    ) {}
+
     /**
      * Store a document securely for an application.
      */
@@ -99,9 +103,14 @@ class DocumentService
             $errors[] = 'File type not allowed. Accepted: JPEG, PNG, PDF.';
         }
 
-        $maxSize = 5 * 1024 * 1024; // 5MB
+        $maxSize = 10 * 1024 * 1024; // 10MB to match controller and security service
         if ($file->getSize() > $maxSize) {
-            $errors[] = 'File size exceeds 5MB limit.';
+            $errors[] = 'File size exceeds 10MB limit.';
+        }
+
+        $securityIssues = $this->fileSecurityService->scan($file);
+        if (!empty($securityIssues)) {
+            $errors = array_merge($errors, $securityIssues);
         }
 
         return $errors;

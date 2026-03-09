@@ -182,16 +182,34 @@ class PaystackService
             return false;
         }
 
-        $payment->update([
-            'status' => 'completed',
-            'paid_at' => now(),
-            'provider_reference' => $data['reference'],
-        ]);
-
         $application = $payment->application;
         if ($application) {
+            // PAY-02: Verify the paid amount matches the expected amount
+            $expectedAmount = $this->calculateTotalAmount($application);
+
+            // Paystack amount is in pesewas in webhook? data['amount'] is usually in pesewas/kobo.
+            // But wait, checking the verify webhook logic in MultiPaymentService, we trust $payment->amount which was stored.
+            // Oh, wait, the webhook amount from Paystack is in kobo? The passed `$data['amount']` is in kobo, so `/ 100` gives GHS.
+            $paidAmount = ($data['amount'] ?? ($payment->amount * 100)) / 100;
+
+            if ($paidAmount < ($expectedAmount - 0.05)) {
+                Log::error("Paystack payment amount mismatch for application {$application->reference_number}. Paid Webhook: {$paidAmount}, Expected: {$expectedAmount}");
+                $payment->update([
+                    'status' => 'failed_amount_mismatch',
+                    'provider_reference' => $data['reference'],
+                ]);
+                return true; // Webhook received successfully, but payment rejected
+            }
+
+            $payment->update([
+                'status' => 'completed',
+                'paid_at' => now(),
+                'provider_reference' => $data['reference'],
+                'amount' => $paidAmount, // Update to actual amount paid
+            ]);
+
             // Store total fee
-            $application->update(['total_fee' => $payment->amount]);
+            $application->update(['total_fee' => $paidAmount]);
 
             // Use centralized ApplicationService for proper status transition + audit trail
             if (in_array($application->status, ['submitted_awaiting_payment', 'pending_payment'])) {

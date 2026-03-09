@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->middleware('auth.errors')->group(function () {
     // Rate limit login attempts: More generous limits to prevent false positives
     Route::post('/login', [AuthController::class, 'login'])->middleware('robust.throttle:10,1');
+    Route::post('/verify-mfa', [AuthController::class, 'verifyMfa'])->middleware('robust.throttle:10,1');
     Route::post('/register', [AuthController::class, 'register'])->middleware('robust.throttle:5,1');
     Route::post('/forgot-password', [PasswordResetController::class, 'sendResetLink'])->middleware('robust.throttle:5,1');
     Route::post('/reset-password', [PasswordResetController::class, 'reset'])->middleware('robust.throttle:10,1');

@@ -228,7 +228,7 @@ class ApplicationService
         'pending_approval'           => ['approved', 'denied', 'additional_info_requested', 'under_review', 'escalated'],
         'approved'                   => ['issued', 'under_review'],
         'denied'                     => ['under_review'],
-        'issued'                     => [],
+        'issued'                     => ['revoked', 'cancelled'],
         'cancelled'                  => ['draft'],
     ];
 

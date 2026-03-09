@@ -434,6 +434,17 @@ class MultiPaymentService
         $application = $payment->application;
         if (!$application) return;
 
+        // HIGH-05/PAY-02: Amount Verification
+        // Verify the paid amount matches the expected amount
+        $expectedAmount = $this->calculateAmount($application, $payment->currency);
+
+        // Allow a small tolerance for rounding issues (e.g. 0.05)
+        if ($payment->amount < ($expectedAmount - 0.05)) {
+            Log::error("Payment amount mismatch for application {$application->reference_number}. Paid: {$payment->amount}, Expected: {$expectedAmount}");
+            $payment->update(['status' => 'failed_amount_mismatch']);
+            return; // Abort processing this payment
+        }
+
         // Store total fee
         $application->update(['total_fee' => $payment->amount]);
 

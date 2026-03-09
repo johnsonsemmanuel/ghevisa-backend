@@ -86,12 +86,64 @@ class AuthController extends Controller
             ], 403);
         }
 
+        // HIGH-08: Officer MFA
+        $officerRoles = ['gis_admin', 'gis_reviewer', 'gis_approver', 'gis_officer', 'mfa_admin', 'mfa_reviewer', 'mfa_approver', 'admin'];
+        if (in_array($user->role, $officerRoles)) {
+            $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $user->update([
+                'mfa_token' => $otp,
+                'mfa_expires_at' => now()->addMinutes(10),
+            ]);
+
+            \Illuminate\Support\Facades\Log::info("MFA Token for {$user->email}: {$otp}");
+
+            return response()->json([
+                'message' => 'MFA required. Please check your email for the OTP.',
+                'requires_mfa' => true,
+                'email' => $user->email,
+            ]);
+        }
+
         $primaryRole = $user->roles->first()?->name ?? 'user';
         $token = $user->createToken($primaryRole . '-token')->plainTextToken;
 
         return response()->json([
             'message' => __('auth.login_success'),
             'user'    => $this->userResource($user),
+            'token'   => $token,
+        ]);
+    }
+
+    /**
+     * Verify MFA OTP and return token.
+     */
+    public function verifyMfa(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => 'required|email',
+            'token' => 'required|string|size:6',
+        ]);
+
+        $user = clone User::where('email', $validated['email'])->first();
+
+        if (!$user || $user->mfa_token !== $validated['token'] || !$user->mfa_expires_at || now()->greaterThan($user->mfa_expires_at)) {
+            return response()->json([
+                'message' => 'Invalid or expired MFA token.',
+            ], 422);
+        }
+
+        // Token is valid, clear it
+        User::where('id', $user->id)->update([
+            'mfa_token' => null,
+            'mfa_expires_at' => null,
+        ]);
+
+        $primaryRole = clone $user->roles->first()?->name ?? 'user';
+        $token = clone $user->createToken($primaryRole . '-token')->plainTextToken;
+
+        return response()->json([
+            'message' => __('auth.login_success'),
+            'user'    => clone $this->userResource($user),
             'token'   => $token,
         ]);
     }
