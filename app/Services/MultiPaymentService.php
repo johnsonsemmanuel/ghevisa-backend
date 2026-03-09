@@ -95,15 +95,11 @@ class MultiPaymentService
         $channels = $method === 'paystack_mobile_money' ? ['mobile_money'] : ['card', 'bank'];
         $baseUrl = config('services.paystack.base_url', 'https://api.paystack.co');
 
-        // Paystack only supports GHS, so convert USD to GHS
-        $paystackCurrency = 'GHS';
-        $exchangeRate = 12.5; // USD to GHS exchange rate
-        $amountInGHS = $amount * $exchangeRate;
-
+        // Use USD for Paystack payments
         $payload = [
             'email' => $application->email ?: config('services.paystack.merchant_email'),
-            'amount' => (int) ($amountInGHS * 100),
-            'currency' => $paystackCurrency,
+            'amount' => (int) ($amount * 100),
+            'currency' => $currency,
             'reference' => $reference,
             'callback_url' => $callbackUrl ?? config('app.frontend_url') . '/payment/callback',
             'channels' => $channels,
@@ -132,7 +128,7 @@ class MultiPaymentService
             if ($response->successful() && $response->json('status')) {
                 $data = $response->json('data');
 
-                $this->createPaymentRecord($application, $reference, 'paystack', $amountInGHS, $paystackCurrency, $method);
+                $this->createPaymentRecord($application, $reference, 'paystack', $amount, $currency, $method);
 
                 // Update application status to pending_payment (not draft)
                 if (in_array($application->status, ['draft', 'submitted_awaiting_payment'])) {
