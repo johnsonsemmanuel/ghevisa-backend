@@ -83,6 +83,9 @@ class CaseController extends Controller
             'riskAssessment',
         ]);
 
+        // SEC-04: Audit log data access
+        $application->logAccess('viewed_by_officer');
+
         return response()->json([
             'application'     => $application,
             'sla_hours_left'  => $application->slaHoursRemaining(),
@@ -356,8 +359,8 @@ class CaseController extends Controller
 
         $this->applicationService->changeStatus($application, 'approved', $validated['notes'] ?? 'Approved');
 
-        // Generate eVisa PDF
-        app(\App\Services\EVisaPdfService::class)->generate($application);
+        // FIX-17/ARCH-03: Queue PDF generation instead of synchronous
+        \App\Jobs\GenerateEVisaPdf::dispatch($application);
 
         // Notification is already dispatched by changeStatus()
 
@@ -417,9 +420,9 @@ class CaseController extends Controller
             return response()->json(['message' => 'Application must be approved before issuing visa'], 422);
         }
 
-        // Generate eVisa PDF if not already generated
+        // FIX-17/ARCH-03: Queue PDF generation if not already generated
         if (!$application->evisa_file_path) {
-            app(\App\Services\EVisaPdfService::class)->generate($application);
+            \App\Jobs\GenerateEVisaPdf::dispatch($application);
         }
 
         $this->applicationService->changeStatus($application, 'issued', 'Visa issued');

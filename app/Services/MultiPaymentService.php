@@ -489,8 +489,8 @@ class MultiPaymentService
         
         $amountUsd = $pricing['total'];
 
-        // HIGH-05: Use configurable exchange rates (TODO: integrate live rate API for production)
-        $rates = config('services.exchange_rates', ['USD' => 1, 'GHS' => 12.5, 'EUR' => 0.92, 'GBP' => 0.79]);
+        // HIGH-05: Use configurable exchange rates from config/exchange_rates.php
+        $rates = config('exchange_rates', ['USD' => 1, 'GHS' => 12.5, 'EUR' => 0.92, 'GBP' => 0.79]);
         $rate = $rates[$currency] ?? 1;
 
         return round($amountUsd * $rate, 2);

@@ -31,6 +31,11 @@ class User extends Authenticatable
         'locale',
         'email_verified_at',
         'email_verification_token',
+        'email_verification_expires_at',
+        'mfa_token',
+        'mfa_expires_at',
+        'failed_login_attempts',
+        'locked_until',
     ];
 
     protected $hidden = [
@@ -42,10 +47,14 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'email_verification_expires_at' => 'datetime',
+            'mfa_expires_at'    => 'datetime',
+            'locked_until'      => 'datetime',
             'password'          => 'hashed',
             'is_active'         => 'boolean',
             'can_review'        => 'boolean',
             'can_approve'       => 'boolean',
+            'failed_login_attempts' => 'integer',
         ];
     }
 

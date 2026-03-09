@@ -44,7 +44,10 @@ Route::get('/visa-types', [ApplicationController::class, 'visaTypes'])->middlewa
 
 // Public: service tiers for fee calculation - moderate rate limiting
 Route::get('/service-tiers', function () {
-    return response()->json(['service_tiers' => \App\Models\ServiceTier::active()->ordered()->get()]);
+    $tiers = cache()->remember('service_tiers_active', 3600, function () {
+        return \App\Models\ServiceTier::active()->ordered()->get();
+    });
+    return response()->json(['service_tiers' => $tiers]);
 })->middleware('throttle:60,1');
 
 // Public: pricing calculation endpoints
@@ -95,7 +98,6 @@ Route::prefix('border')->middleware(['auth:sanctum', 'throttle:60,1'])->group(fu
 // Authenticated Border Control routes
 Route::middleware(['auth:sanctum'])->prefix('border')->group(function () {
     Route::post('/crossing', [\App\Http\Controllers\Api\BorderController::class, 'recordCrossing']);
-    Route::post('/record', [\App\Http\Controllers\Api\BorderController::class, 'recordCrossing']);
     Route::post('/verify-and-record', [\App\Http\Controllers\Api\BorderController::class, 'verifyAndRecordEntry']);
     Route::get('/offline-cache', [\App\Http\Controllers\Api\BorderController::class, 'offlineCache']);
     Route::get('/statistics', [\App\Http\Controllers\Api\BorderController::class, 'statistics']);

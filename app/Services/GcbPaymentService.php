@@ -49,24 +49,26 @@ class GcbPaymentService
             $checkoutId = 'TEST_' . strtoupper(Str::random(16));
             $mockCheckoutUrl = config('app.frontend_url') . '/payment/gcb-test?merchantRef=' . $merchantRef . '&checkoutId=' . $checkoutId;
 
-            // Create payment record
-            $payment = Payment::updateOrCreate(
-                ['application_id' => $application->id],
-                [
-                    'merchant_ref' => $merchantRef,
-                    'checkout_id' => $checkoutId,
-                    'checkout_url' => $mockCheckoutUrl,
-                    'amount' => $amount,
-                    'currency' => 'GHS',
-                    'status' => 'pending',
-                    'gateway' => 'gcb',
-                    'gateway_response' => [
-                        'test_mode' => true,
-                        'checkOutId' => $checkoutId,
-                        'checkOutUrl' => $mockCheckoutUrl,
-                    ],
-                ]
-            );
+            // DB-03: Use create instead of updateOrCreate to preserve payment history
+            // PAY-05: Mark test payments distinctly
+            $payment = Payment::create([
+                'application_id' => $application->id,
+                'user_id' => $application->user_id,
+                'merchant_ref' => $merchantRef,
+                'checkout_id' => $checkoutId,
+                'checkout_url' => $mockCheckoutUrl,
+                'transaction_reference' => $merchantRef,
+                'payment_provider' => 'gcb_test',
+                'amount' => $amount,
+                'currency' => 'GHS',
+                'status' => 'pending',
+                'gateway' => 'gcb',
+                'gateway_response' => [
+                    'test_mode' => true,
+                    'checkOutId' => $checkoutId,
+                    'checkOutUrl' => $mockCheckoutUrl,
+                ],
+            ]);
 
             return [
                 'success' => true,
@@ -109,20 +111,21 @@ class GcbPaymentService
                     ];
                 }
 
-                // Create or update payment record
-                $payment = Payment::updateOrCreate(
-                    ['application_id' => $application->id],
-                    [
-                        'merchant_ref' => $merchantRef,
-                        'checkout_id' => $data['checkOutId'] ?? null,
-                        'checkout_url' => $data['checkOutUrl'] ?? null,
-                        'amount' => $amount,
-                        'currency' => 'GHS',
-                        'status' => 'pending',
-                        'gateway' => 'gcb',
-                        'gateway_response' => $data,
-                    ]
-                );
+                // DB-03: Use create to preserve payment history
+                $payment = Payment::create([
+                    'application_id' => $application->id,
+                    'user_id' => $application->user_id,
+                    'merchant_ref' => $merchantRef,
+                    'checkout_id' => $data['checkOutId'] ?? null,
+                    'checkout_url' => $data['checkOutUrl'] ?? null,
+                    'transaction_reference' => $merchantRef,
+                    'payment_provider' => 'gcb',
+                    'amount' => $amount,
+                    'currency' => 'GHS',
+                    'status' => 'pending',
+                    'gateway' => 'gcb',
+                    'gateway_response' => $data,
+                ]);
 
                 Log::info('GCB Checkout initiated', [
                     'application_id' => $application->id,

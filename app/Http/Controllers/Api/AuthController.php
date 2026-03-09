@@ -63,13 +63,45 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
+        // SEC-03: Check account lockout before attempting auth
+        $user = User::where('email', $validated['email'])->first();
+        if ($user && $user->locked_until && now()->lt($user->locked_until)) {
+            $minutesLeft = now()->diffInMinutes($user->locked_until);
+            return response()->json([
+                'message' => "Account temporarily locked due to too many failed attempts. Try again in {$minutesLeft} minute(s).",
+            ], 429);
+        }
+
         if (!Auth::attempt($validated)) {
+            // SEC-03: Track failed login attempts
+            if ($user) {
+                $attempts = ($user->failed_login_attempts ?? 0) + 1;
+                $lockData = ['failed_login_attempts' => $attempts];
+
+                if ($attempts >= 5) {
+                    $lockData['locked_until'] = now()->addMinutes(15);
+                    \Illuminate\Support\Facades\Log::warning('Account locked after failed attempts', [
+                        'email' => $validated['email'],
+                        'attempts' => $attempts,
+                        'ip' => $request->ip(),
+                    ]);
+                }
+
+                $user->update($lockData);
+            }
+
             return response()->json([
                 'message' => __('auth.failed'),
             ], 401);
         }
 
-        $user = User::where('email', $validated['email'])->first();
+        // Reset failed attempts on successful login
+        if ($user) {
+            $user->update([
+                'failed_login_attempts' => 0,
+                'locked_until' => null,
+            ]);
+        }
 
         if (!$user->is_active) {
             return response()->json([
@@ -124,7 +156,7 @@ class AuthController extends Controller
             'token' => 'required|string|size:6',
         ]);
 
-        $user = clone User::where('email', $validated['email'])->first();
+        $user = User::where('email', $validated['email'])->first();
 
         if (!$user || $user->mfa_token !== $validated['token'] || !$user->mfa_expires_at || now()->greaterThan($user->mfa_expires_at)) {
             return response()->json([
@@ -132,18 +164,20 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Token is valid, clear it
-        User::where('id', $user->id)->update([
+        // Token is valid, clear it and reset failed login attempts
+        $user->update([
             'mfa_token' => null,
             'mfa_expires_at' => null,
+            'failed_login_attempts' => 0,
+            'locked_until' => null,
         ]);
 
-        $primaryRole = clone $user->roles->first()?->name ?? 'user';
-        $token = clone $user->createToken($primaryRole . '-token')->plainTextToken;
+        $primaryRole = $user->roles->first()?->name ?? 'user';
+        $token = $user->createToken($primaryRole . '-token')->plainTextToken;
 
         return response()->json([
             'message' => __('auth.login_success'),
-            'user'    => clone $this->userResource($user),
+            'user'    => $this->userResource($user),
             'token'   => $token,
         ]);
     }

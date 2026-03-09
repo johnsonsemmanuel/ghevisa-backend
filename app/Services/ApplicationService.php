@@ -129,16 +129,18 @@ class ApplicationService
      */
     public function submitForPayment(Application $application): Application
     {
-        $fromStatus = $application->status;
-        $application->status = 'submitted_awaiting_payment';
-        $application->submitted_at = now();
-        $application->save();
+        return DB::transaction(function () use ($application) {
+            $fromStatus = $application->status;
+            $application->status = 'submitted_awaiting_payment';
+            $application->submitted_at = now();
+            $application->save();
 
-        $this->recordStatusChange($application, $fromStatus, 'submitted_awaiting_payment', 'Application submitted, awaiting payment');
+            $this->recordStatusChange($application, $fromStatus, 'submitted_awaiting_payment', 'Application submitted, awaiting payment');
 
-        SendNotification::dispatch($application, 'status_changed', ['status' => 'submitted_awaiting_payment']);
+            SendNotification::dispatch($application, 'status_changed', ['status' => 'submitted_awaiting_payment']);
 
-        return $application;
+            return $application;
+        });
     }
 
     /**
@@ -223,12 +225,15 @@ class ApplicationService
         'paid_submitted'             => ['submitted', 'cancelled'],
         'submitted'                  => ['under_review', 'pending_approval', 'additional_info_requested', 'denied', 'cancelled'],
         'under_review'               => ['pending_approval', 'additional_info_requested', 'escalated', 'approved', 'denied'],
-        'additional_info_requested'  => ['under_review', 'cancelled'],
+        'additional_info_requested'  => ['under_review', 'submitted', 'cancelled'],
         'escalated'                  => ['under_review', 'pending_approval', 'additional_info_requested', 'approved', 'denied'],
         'pending_approval'           => ['approved', 'denied', 'additional_info_requested', 'under_review', 'escalated'],
-        'approved'                   => ['issued', 'under_review'],
-        'denied'                     => ['under_review'],
-        'issued'                     => ['revoked', 'cancelled'],
+        'approved'                   => ['issued', 'under_review', 'denied'],
+        'denied'                     => ['under_review', 'appealed'],
+        'issued'                     => ['revoked', 'expired'],
+        'revoked'                    => [],
+        'expired'                    => [],
+        'appealed'                   => ['under_review', 'denied'],
         'cancelled'                  => ['draft'],
     ];
 
@@ -255,37 +260,39 @@ class ApplicationService
             );
         }
 
-        $application->status = $newStatus;
+        return DB::transaction(function () use ($application, $fromStatus, $newStatus, $notes) {
+            $application->status = $newStatus;
 
-        if (in_array($newStatus, ['approved', 'denied'])) {
-            $application->decided_at = now();
-            $application->decision_notes = $notes;
-        }
+            if (in_array($newStatus, ['approved', 'denied'])) {
+                $application->decided_at = now();
+                $application->decision_notes = $notes;
+            }
 
-        // Queue management: clear queue on terminal statuses, restore on revert
-        if (in_array($newStatus, ['approved', 'denied', 'issued', 'cancelled'])) {
-            $application->current_queue = null;
-        } elseif ($newStatus === 'under_review' && in_array($fromStatus, ['approved', 'denied', 'pending_approval', 'escalated', 'additional_info_requested'])) {
-            $application->current_queue = 'review_queue';
-        }
+            // Queue management: clear queue on terminal statuses, restore on revert
+            if (in_array($newStatus, ['approved', 'denied', 'issued', 'cancelled', 'revoked', 'expired'])) {
+                $application->current_queue = null;
+            } elseif ($newStatus === 'under_review' && in_array($fromStatus, ['approved', 'denied', 'pending_approval', 'escalated', 'additional_info_requested', 'appealed'])) {
+                $application->current_queue = 'review_queue';
+            }
 
-        $application->save();
-        $this->recordStatusChange($application, $fromStatus, $newStatus, $notes);
+            $application->save();
+            $this->recordStatusChange($application, $fromStatus, $newStatus, $notes);
 
-        // Send appropriate notifications based on status change
-        if ($newStatus === 'approved') {
-            SendNotification::dispatch($application, 'application_approved');
-        } elseif ($newStatus === 'denied') {
-            SendNotification::dispatch($application, 'application_denied');
-        } elseif ($newStatus === 'issued') {
-            SendNotification::dispatch($application, 'visa_issued');
-        } elseif ($newStatus === 'additional_info_requested') {
-            SendNotification::dispatch($application, 'document_reupload_required', ['reason' => $notes]);
-        } else {
-            SendNotification::dispatch($application, 'status_changed', ['status' => $newStatus]);
-        }
+            // Send appropriate notifications based on status change
+            if ($newStatus === 'approved') {
+                SendNotification::dispatch($application, 'application_approved');
+            } elseif ($newStatus === 'denied') {
+                SendNotification::dispatch($application, 'application_denied');
+            } elseif ($newStatus === 'issued') {
+                SendNotification::dispatch($application, 'visa_issued');
+            } elseif ($newStatus === 'additional_info_requested') {
+                SendNotification::dispatch($application, 'document_reupload_required', ['reason' => $notes]);
+            } else {
+                SendNotification::dispatch($application, 'status_changed', ['status' => $newStatus]);
+            }
 
-        return $application;
+            return $application;
+        });
     }
 
     /**

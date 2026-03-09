@@ -52,6 +52,15 @@ class DocumentController extends Controller
 
         $file = $request->file('file');
 
+        // HIGH-04: Security scan for malware/dangerous content
+        $securityIssues = $this->fileSecurityService->scan($file);
+        if (!empty($securityIssues)) {
+            return response()->json([
+                'message' => 'File rejected by security scan',
+                'errors' => ['file' => $securityIssues],
+            ], 422);
+        }
+
         $errors = $this->documentService->validateFile($file);
         if (!empty($errors)) {
             return response()->json(['message' => 'Validation failed', 'errors' => $errors], 422);
@@ -81,6 +90,15 @@ class DocumentController extends Controller
         $request->validate([
             'file' => 'required|file|max:5120|mimes:jpeg,jpg,png,pdf',
         ]);
+
+        // HIGH-04: Security scan for reuploads
+        $securityIssues = $this->fileSecurityService->scan($request->file('file'));
+        if (!empty($securityIssues)) {
+            return response()->json([
+                'message' => 'File rejected by security scan',
+                'errors' => ['file' => $securityIssues],
+            ], 422);
+        }
 
         $document = $this->documentService->reupload($document, $request->file('file'));
 

@@ -37,9 +37,12 @@ class ApplicationController extends Controller
      */
     public function visaTypes(): JsonResponse
     {
-        $types = VisaType::where('is_active', true)
-            ->select('id', 'name', 'slug', 'description', 'base_fee', 'multiple_entry_fee', 'government_fee', 'platform_fee', 'entry_type', 'validity_period', 'category', 'max_duration_days', 'required_documents')
-            ->get();
+        // FIX-16/ARCH-02: Cache visa types for 1 hour
+        $types = cache()->remember('visa_types_active', 3600, function () {
+            return VisaType::where('is_active', true)
+                ->select('id', 'name', 'slug', 'description', 'base_fee', 'multiple_entry_fee', 'government_fee', 'platform_fee', 'entry_type', 'validity_period', 'category', 'max_duration_days', 'required_documents')
+                ->get();
+        });
 
         return response()->json(['visa_types' => $types]);
     }
@@ -180,9 +183,15 @@ class ApplicationController extends Controller
             'last_name'        => 'sometimes|string|max:255',
             'date_of_birth'    => 'sometimes|date|before:today',
             'passport_number'  => 'sometimes|string|max:50',
+            'passport_issue_date' => 'nullable|date|before_or_equal:today',
+            'passport_expiry'  => 'nullable|date|after:today',
             'nationality'      => 'sometimes|string|max:3',
             'email'            => 'sometimes|email',
             'phone'            => 'nullable|string|max:20',
+            'gender'           => 'nullable|string|in:male,female',
+            'marital_status'   => 'nullable|string|in:single,married,divorced,widowed,separated',
+            'profession'       => 'nullable|string|max:255',
+            'country_of_birth' => 'nullable|string|max:3',
             'intended_arrival' => 'nullable|date|after:today',
             'duration_days'    => 'nullable|integer|min:1|max:365',
             'address_in_ghana' => 'nullable|string|max:500',

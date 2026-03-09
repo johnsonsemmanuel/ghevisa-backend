@@ -80,6 +80,9 @@ class ReportController extends Controller
             'riskAssessment',
         ]);
 
+        // SEC-04: Audit log data access
+        $application->logAccess('viewed_by_admin');
+
         return response()->json([
             'application' => $application,
         ]);
