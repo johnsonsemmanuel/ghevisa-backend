@@ -70,4 +70,15 @@ return [
         ],
     ],
 
+    'gcb' => [
+        'base_url' => env('GCB_BASE_URL', 'https://epayuat.gcbltd.com:98/paymentgateway'),
+        'api_key' => env('GCB_API_KEY', ''),
+        'callback_url' => env('GCB_CALLBACK_URL', ''),
+    ],
+
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY', ''),
+        'model' => env('OPENAI_MODEL', 'gpt-4o'),
+    ],
+
 ];

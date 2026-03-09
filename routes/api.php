@@ -32,6 +32,12 @@ Route::prefix('auth')->middleware('auth.errors')->group(function () {
 // Payment webhook (no auth — verified via provider signature)
 Route::post('/webhooks/payment', [WebhookController::class, 'handlePayment'])->middleware('throttle:60,1');
 
+// GCB Payment Gateway callback (called by GCB server)
+Route::post('/gcb/callback', [\App\Http\Controllers\Api\GcbPaymentController::class, 'callback'])->middleware('throttle:60,1');
+
+// GCB Payment verification (called by frontend after redirect)
+Route::get('/gcb/verify', [\App\Http\Controllers\Api\GcbPaymentController::class, 'verify'])->middleware('throttle:60,1');
+
 // Public: available visa types - moderate rate limiting
 Route::get('/visa-types', [ApplicationController::class, 'visaTypes'])->middleware('throttle:60,1');
 
@@ -155,6 +161,10 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         Route::post('/payment/simulate', [\App\Http\Controllers\Api\Applicant\PaymentController::class, 'simulatePayment']);
         Route::get('/applications/{application}/payments', [\App\Http\Controllers\Api\PaymentController::class, 'history']);
         Route::post('/payment/upload-proof', [\App\Http\Controllers\Api\PaymentController::class, 'uploadProof']);
+
+        // GCB Payment Gateway
+        Route::post('/payment/gcb/checkout', [\App\Http\Controllers\Api\GcbPaymentController::class, 'initiateCheckout']);
+        Route::post('/payment/gcb/status', [\App\Http\Controllers\Api\GcbPaymentController::class, 'checkStatus']);
 
         // OCR - Extract passport data
         Route::post('/ocr/extract-passport', [\App\Http\Controllers\Api\Applicant\OcrController::class, 'extractPassportData']);
@@ -309,6 +319,18 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         Route::get('/analytics/dashboard', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'dashboard']);
         Route::get('/analytics/officers', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'officerPerformance']);
         Route::get('/analytics/export', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'exportCsv']);
+
+        // Financial Reports
+        Route::get('/analytics/financial', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'financialReports']);
+        Route::get('/analytics/financial/export', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'exportFinancialCsv']);
+
+        // Country Analytics
+        Route::get('/analytics/countries', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'countryAnalytics']);
+        Route::get('/analytics/countries/export', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'exportCountryCsv']);
+
+        // AI Support Assistant
+        Route::post('/ai-assistant/query', [\App\Http\Controllers\Api\Admin\AiAssistantController::class, 'query']);
+        Route::post('/ai-assistant/export', [\App\Http\Controllers\Api\Admin\AiAssistantController::class, 'exportResults']);
 
         // Payment Management
         Route::get('/payments/statistics', [\App\Http\Controllers\Api\PaymentController::class, 'statistics']);

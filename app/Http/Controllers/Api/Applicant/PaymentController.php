@@ -12,16 +12,16 @@ use Illuminate\Support\Facades\Log;
 
 class PaymentController extends Controller
 {
-    protected ApplicationService $applicationService;
+    protected \App\Services\MultiPaymentService $multiPaymentService;
 
-    public function __construct(ApplicationService $applicationService)
+    public function __construct(ApplicationService $applicationService, \App\Services\MultiPaymentService $multiPaymentService)
     {
         $this->applicationService = $applicationService;
+        $this->multiPaymentService = $multiPaymentService;
     }
 
     /**
-     * Demo payment verification - automatically approves payment for demo purposes.
-     * In production, this would verify with actual payment gateway.
+     * Verify payment with the actual payment gateway.
      */
     public function verify(Request $request): JsonResponse
     {
@@ -30,52 +30,50 @@ class PaymentController extends Controller
         ]);
 
         $reference = $request->input('reference');
+        
+        // Pass to MultiPaymentService
+        $result = $this->multiPaymentService->verifyPayment($reference);
 
-        // Find payment by transaction reference
-        $payment = Payment::where('transaction_reference', $reference)->first();
-
-        if (!$payment) {
+        if (!$result['success'] && !isset($result['payment'])) {
             return response()->json([
                 'success' => false,
-                'message' => 'Payment not found',
-            ], 404);
+                'message' => 'Payment verification failed: ' . ($result['status'] ?? 'unknown'),
+            ], 400);
         }
 
-        // DEMO MODE: Auto-approve payment
-        if ($payment->status === 'pending') {
-            $payment->update([
-                'status' => 'completed',
-                'paid_at' => now(),
-                'provider_response' => [
-                    'demo_mode' => true,
-                    'message' => 'Payment auto-approved for demo purposes',
-                    'verified_at' => now()->toIso8601String(),
-                ],
-            ]);
+        $payment = $result['payment'] ?? Payment::where('transaction_reference', $reference)->first();
 
-            // Update application status
+        // If successful, check if we need to manually trigger submission
+        // (Note: MultiPaymentService might have already called confirmPayment)
+        if ($result['success'] && $payment && $payment->status === 'completed') {
             $application = $payment->application;
             
-            if ($application && in_array($application->status, ['submitted_awaiting_payment', 'pending_payment', 'draft'])) {
-                $this->applicationService->confirmPayment($application);
+            // Re-fetch to get latest status
+            if ($application) {
+                $application->refresh();
                 
-                // Submit the application to trigger routing
-                $this->applicationService->submit($application->fresh());
-                
-                Log::info('Demo payment completed and application submitted', [
-                    'payment_id' => $payment->id,
-                    'application_id' => $application->id,
-                    'reference' => $reference,
-                    'new_status' => $application->fresh()->status,
-                ]);
+                // If it's still in a pre-submission state after confirmPayment, submit it
+                if (in_array($application->status, ['paid_submitted', 'submitted_awaiting_payment', 'pending_payment', 'draft'])) {
+                    // This method handles routing
+                    try {
+                        $this->applicationService->submit($application);
+                        Log::info('Payment verified and application submitted', [
+                            'payment_id' => $payment->id,
+                            'application_id' => $application->id,
+                            'reference' => $reference,
+                            'new_status' => $application->fresh()->status,
+                        ]);
+                    } catch (\Exception $e) {
+                         Log::error('App submission failed after payment: ' . $e->getMessage());
+                    }
+                }
             }
         }
 
         return response()->json([
-            'success' => true,
-            'status' => $payment->status,
-            'message' => 'Payment verified successfully (Demo Mode)',
-            'demo_note' => 'This is a demo payment - no actual transaction was processed',
+            'success' => $result['success'],
+            'status' => $result['status'] ?? ($payment ? $payment->status : 'failed'),
+            'message' => $result['success'] ? 'Payment verified successfully' : 'Payment verification failed',
             'application_status' => $payment->application->status ?? null,
         ]);
     }
