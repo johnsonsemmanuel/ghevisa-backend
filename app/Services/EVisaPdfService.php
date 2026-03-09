@@ -77,7 +77,7 @@ class EVisaPdfService
                 $application->passport_number . 
                 $application->decided_at?->timestamp;
         
-        $checksum = strtoupper(substr(hash('sha256', $data), 0, 8));
+        $checksum = strtoupper(hash_hmac('sha256', $data, config('app.key')));
         
         return "GHEVISA:{$application->reference_number}:{$checksum}";
     }

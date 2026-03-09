@@ -54,14 +54,22 @@ class ApplicationController extends Controller
             'identifier'       => 'required|string', // phone or email
         ]);
 
-        $application = Application::where('reference_number', $validated['reference_number'])
-            ->where(function ($query) use ($validated) {
-                $query->where('email_encrypted', $validated['identifier'])
-                      ->orWhere('phone_encrypted', $validated['identifier']);
-            })
-            ->first();
+        // CRIT-10: Fetch by reference_number, then compare decrypted PII in PHP
+        // (Cannot query encrypted columns directly with WHERE clauses)
+        $application = Application::where('reference_number', $validated['reference_number'])->first();
 
         if (!$application) {
+            return response()->json([
+                'message' => __('application.not_found'),
+            ], 404);
+        }
+
+        // Verify identity: compare against decrypted email or phone
+        $identifier = strtolower(trim($validated['identifier']));
+        $emailMatch = strtolower(trim($application->email ?? '')) === $identifier;
+        $phoneMatch = trim($application->phone ?? '') === trim($validated['identifier']);
+
+        if (!$emailMatch && !$phoneMatch) {
             return response()->json([
                 'message' => __('application.not_found'),
             ], 404);
@@ -172,7 +180,7 @@ class ApplicationController extends Controller
             'last_name'        => 'sometimes|string|max:255',
             'date_of_birth'    => 'sometimes|date|before:today',
             'passport_number'  => 'sometimes|string|max:50',
-            'nationality'      => 'sometimes|string|max:100',
+            'nationality'      => 'sometimes|string|max:3',
             'email'            => 'sometimes|email',
             'phone'            => 'nullable|string|max:20',
             'intended_arrival' => 'nullable|date|after:today',

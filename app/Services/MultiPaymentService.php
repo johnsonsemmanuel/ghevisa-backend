@@ -71,6 +71,32 @@ class MultiPaymentService
         string $currency = 'GHS',
         ?string $callbackUrl = null
     ): array {
+        // HIGH-06: Idempotency — reject if a pending payment already exists
+        $existingPending = Payment::where('application_id', $application->id)
+            ->where('status', 'pending')
+            ->where('created_at', '>=', now()->subMinutes(30))
+            ->first();
+
+        if ($existingPending) {
+            return [
+                'success' => false,
+                'message' => 'A pending payment already exists for this application. Please complete or wait for it to expire.',
+                'existing_reference' => $existingPending->transaction_reference,
+            ];
+        }
+
+        // Also reject if already paid
+        $existingCompleted = Payment::where('application_id', $application->id)
+            ->where('status', 'completed')
+            ->first();
+
+        if ($existingCompleted) {
+            return [
+                'success' => false,
+                'message' => 'This application has already been paid for.',
+            ];
+        }
+
         $amount = $this->calculateAmount($application, $currency);
 
         return match ($paymentMethod) {
@@ -106,7 +132,8 @@ class MultiPaymentService
             // Try USD first, but if merchant doesn't support it, we'll convert to GHS
             // The test keys typically only support GHS
             $paystackCurrency = 'GHS';
-            $paystackAmount = $amount * 12.5; // Convert USD to GHS
+            $ghsRate = config('services.exchange_rates.GHS', 12.5);
+            $paystackAmount = $amount * $ghsRate; // Convert USD to GHS
         }
 
         $payload = [
@@ -451,8 +478,8 @@ class MultiPaymentService
         
         $amountUsd = $pricing['total'];
 
-        // Convert if needed (simplified - use real exchange rates in production)
-        $rates = ['USD' => 1, 'GHS' => 12.5, 'EUR' => 0.92, 'GBP' => 0.79];
+        // HIGH-05: Use configurable exchange rates (TODO: integrate live rate API for production)
+        $rates = config('services.exchange_rates', ['USD' => 1, 'GHS' => 12.5, 'EUR' => 0.92, 'GBP' => 0.79]);
         $rate = $rates[$currency] ?? 1;
 
         return round($amountUsd * $rate, 2);

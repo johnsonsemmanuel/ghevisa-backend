@@ -7,6 +7,7 @@ use App\Models\Application;
 use App\Models\ApplicationStatusHistory;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Request;
 
 class ApplicationService
@@ -151,18 +152,20 @@ class ApplicationService
             return $application;
         }
 
-        $fromStatus = $application->status;
-        $application->status = 'paid_submitted';
-        if (!$application->submitted_at) {
-            $application->submitted_at = now();
-        }
-        $application->save();
+        return DB::transaction(function () use ($application) {
+            $fromStatus = $application->status;
+            $application->status = 'paid_submitted';
+            if (!$application->submitted_at) {
+                $application->submitted_at = now();
+            }
+            $application->save();
 
-        $this->recordStatusChange($application, $fromStatus, 'paid_submitted', 'Payment confirmed');
+            $this->recordStatusChange($application, $fromStatus, 'paid_submitted', 'Payment confirmed');
 
-        SendNotification::dispatch($application, 'status_changed', ['status' => 'paid_submitted']);
+            SendNotification::dispatch($application, 'status_changed', ['status' => 'paid_submitted']);
 
-        return $application;
+            return $application;
+        });
     }
 
     /**
@@ -172,39 +175,41 @@ class ApplicationService
      */
     public function submit(Application $application): Application
     {
-        // Check for blacklisted nationalities
-        $visaType = $application->visaType;
-        if ($visaType && !empty($visaType->blacklisted_nationalities)) {
-            $blacklisted = $visaType->blacklisted_nationalities;
-            if (in_array($application->nationality, $blacklisted)) {
-                $application->status = 'denied';
-                $application->decided_at = now();
-                $application->decision_notes = 'Application automatically denied: nationality not eligible for this visa type.';
-                $application->save();
-                
-                $this->changeStatus($application, 'denied', 'Auto-denied: blacklisted nationality');
-                return $application;
+        return DB::transaction(function () use ($application) {
+            // Check for blacklisted nationalities
+            $visaType = $application->visaType;
+            if ($visaType && !empty($visaType->blacklisted_nationalities)) {
+                $blacklisted = $visaType->blacklisted_nationalities;
+                if (in_array($application->nationality, $blacklisted)) {
+                    $application->status = 'denied';
+                    $application->decided_at = now();
+                    $application->decision_notes = 'Application automatically denied: nationality not eligible for this visa type.';
+                    $application->save();
+
+                    $this->recordStatusChange($application, $application->status, 'denied', 'Auto-denied: blacklisted nationality');
+                    return $application;
+                }
             }
-        }
 
-        $fromStatus = $application->status;
-        $application->status = 'submitted';
-        if (!$application->submitted_at) {
-            $application->submitted_at = now();
-        }
-        $application->save();
+            $fromStatus = $application->status;
+            $application->status = 'submitted';
+            if (!$application->submitted_at) {
+                $application->submitted_at = now();
+            }
+            $application->save();
 
-        $this->recordStatusChange($application, $fromStatus, 'submitted', 'Application submitted with payment');
+            $this->recordStatusChange($application, $fromStatus, 'submitted', 'Application submitted with payment');
 
-        // Dispatch routing through CPH
-        $this->routingService->route($application);
-        $this->recordStatusChange($application, 'submitted', $application->status, "Routed to {$application->assigned_agency} as {$application->tier}");
+            // Dispatch routing through CPH
+            $this->routingService->route($application);
+            $this->recordStatusChange($application, 'submitted', $application->status, "Routed to {$application->assigned_agency} as {$application->tier}");
 
-        // Send notifications
-        SendNotification::dispatch($application, 'application_submitted');
-        SendNotification::dispatch($application, 'new_application_assigned');
+            // Send notifications
+            SendNotification::dispatch($application, 'application_submitted');
+            SendNotification::dispatch($application, 'new_application_assigned');
 
-        return $application;
+            return $application;
+        });
     }
 
     /**

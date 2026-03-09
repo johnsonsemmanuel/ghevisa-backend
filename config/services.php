@@ -76,12 +76,25 @@ return [
         'base_url' => env('GCB_BASE_URL', 'https://epayuat.gcbltd.com:98/paymentgateway'),
         'api_key' => env('GCB_API_KEY', ''),
         'callback_url' => env('GCB_CALLBACK_URL', ''),
-        'test_mode' => env('GCB_TEST_MODE', true), // Enable test mode when API key is not configured
+        'callback_secret' => env('GCB_CALLBACK_SECRET', ''),
+        'test_mode' => env('GCB_TEST_MODE', true),
     ],
 
     'openai' => [
         'api_key' => env('OPENAI_API_KEY', ''),
         'model' => env('OPENAI_MODEL', 'gpt-4o'),
+    ],
+
+    'eta' => [
+        'callback_secret' => env('ETA_CALLBACK_SECRET', ''),
+    ],
+
+    // HIGH-05: Configurable exchange rates (replace with live API in production)
+    'exchange_rates' => [
+        'USD' => (float) env('EXCHANGE_RATE_USD', 1),
+        'GHS' => (float) env('EXCHANGE_RATE_GHS', 12.5),
+        'EUR' => (float) env('EXCHANGE_RATE_EUR', 0.92),
+        'GBP' => (float) env('EXCHANGE_RATE_GBP', 0.79),
     ],
 
 ];

@@ -5,14 +5,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\Payment;
+use App\Services\ApplicationService;
 use App\Services\MultiPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class PaymentController extends Controller
 {
     public function __construct(
-        protected MultiPaymentService $paymentService
+        protected MultiPaymentService $paymentService,
+        protected ApplicationService $applicationService
     ) {}
 
     /**
@@ -64,13 +67,117 @@ class PaymentController extends Controller
      */
     public function verify(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        $request->validate([
             'reference' => 'required|string',
         ]);
 
-        $result = $this->paymentService->verifyPayment($validated['reference']);
+        $reference = $request->input('reference');
+        
+        $result = $this->paymentService->verifyPayment($reference);
 
-        return response()->json($result);
+        if (!$result['success'] && !isset($result['payment'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Payment verification failed: ' . ($result['status'] ?? 'unknown'),
+            ], 400);
+        }
+
+        $payment = $result['payment'] ?? Payment::where('transaction_reference', $reference)->first();
+
+        // If successful, check if we need to manually trigger submission
+        if ($result['success'] && $payment && $payment->status === 'completed') {
+            $application = $payment->application;
+            
+            if ($application) {
+                $application->refresh();
+                
+                if (in_array($application->status, ['paid_submitted', 'submitted_awaiting_payment', 'pending_payment', 'draft'])) {
+                    try {
+                        $this->applicationService->submit($application);
+                        Log::info('Payment verified and application submitted', [
+                            'payment_id' => $payment->id,
+                            'application_id' => $application->id,
+                            'reference' => $reference,
+                            'new_status' => $application->fresh()->status,
+                        ]);
+                    } catch (\Exception $e) {
+                         Log::error('App submission failed after payment: ' . $e->getMessage());
+                    }
+                }
+            }
+        }
+
+        return response()->json([
+            'success' => $result['success'],
+            'status' => $result['status'] ?? ($payment ? $payment->status : 'failed'),
+            'message' => $result['success'] ? 'Payment verified successfully' : 'Payment verification failed',
+            'application_status' => $payment->application->status ?? null,
+        ]);
+    }
+
+    /**
+     * Demo payment simulation - creates a completed payment immediately.
+     * SECURITY: Only available in local/testing environments.
+     */
+    public function simulatePayment(Request $request): JsonResponse
+    {
+        if (!app()->environment('local', 'testing')) {
+            Log::warning('Payment simulation attempted in production', [
+                'user_id' => $request->user()?->id,
+                'ip' => $request->ip(),
+            ]);
+            return response()->json(['message' => 'Not found'], 404);
+        }
+
+        $request->validate([
+            'application_id' => 'required|exists:applications,id',
+        ]);
+
+        $application = Application::findOrFail($request->input('application_id'));
+
+        if ($application->user_id !== $request->user()->id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $existingPayment = Payment::where('application_id', $application->id)
+            ->where('status', 'completed')
+            ->first();
+
+        if ($existingPayment) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Application already paid',
+                'payment' => $existingPayment,
+            ]);
+        }
+
+        $payment = Payment::create([
+            'application_id' => $application->id,
+            'user_id' => $application->user_id,
+            'transaction_reference' => 'DEMO-' . strtoupper(uniqid()),
+            'payment_provider' => 'demo',
+            'amount' => $application->total_fee ?? 260.00,
+            'currency' => 'USD',
+            'status' => 'completed',
+            'paid_at' => now(),
+            'provider_response' => [
+                'demo_mode' => true,
+                'message' => 'Demo payment - no actual transaction',
+            ],
+        ]);
+
+        if (in_array($application->status, ['submitted_awaiting_payment', 'pending_payment', 'draft'])) {
+            $this->applicationService->confirmPayment($application);
+            $this->applicationService->submit($application->fresh());
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Demo payment completed successfully',
+            'demo_note' => 'This is for demo purposes only - no actual payment was processed',
+            'payment' => $payment,
+            'application_status' => $application->fresh()->status,
+        ]);
     }
 
     /**

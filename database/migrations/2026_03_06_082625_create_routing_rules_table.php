@@ -20,7 +20,7 @@ return new class extends Migration
             $table->json('nationalities')->nullable();
             $table->json('conditions')->nullable();
             $table->enum('route_to', ['gis_hq', 'mfa_hq', 'mfa_mission'])->default('gis_hq');
-            $table->foreignId('mfa_mission_id')->nullable()->constrained()->nullOnDelete();
+            $table->unsignedBigInteger('mfa_mission_id')->nullable();
             $table->integer('priority')->default(100);
             $table->integer('sla_hours')->default(72);
             $table->boolean('requires_interview')->default(false);

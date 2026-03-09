@@ -14,6 +14,7 @@ class DocumentController extends Controller
     public function __construct(
         protected DocumentService $documentService,
         protected \App\Services\OcrService $ocrService,
+        protected \App\Services\FileSecurityService $fileSecurityService,
     ) {}
 
     /**

@@ -185,7 +185,7 @@ class QrCodeService
                 $application->decided_at?->format('Ymd') .
                 config('app.key');
 
-        return substr(hash('sha256', $data), 0, 16);
+        return hash_hmac('sha256', $data, config('app.key'));
     }
 
     /**
@@ -195,9 +195,8 @@ class QrCodeService
     {
         $data = $eta->eta_number . 
                 $eta->reference_number . 
-                $eta->approved_at?->format('Ymd') .
-                config('app.key');
+                $eta->approved_at?->format('Ymd');
 
-        return substr(hash('sha256', $data), 0, 16);
+        return hash_hmac('sha256', $data, config('app.key'));
     }
 }

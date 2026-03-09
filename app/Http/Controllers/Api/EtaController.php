@@ -227,6 +227,23 @@ class EtaController extends Controller
      */
     public function paymentCallback(Request $request): JsonResponse
     {
+        // CRIT-06: Verify callback signature to prevent forged payment confirmations
+        $signature = $request->header('X-Signature');
+        $callbackSecret = config('services.eta.callback_secret');
+
+        if ($callbackSecret) {
+            if (!$signature) {
+                \Log::warning('ETA payment callback missing signature', ['ip' => $request->ip()]);
+                return response()->json(['message' => 'Missing signature'], 401);
+            }
+
+            $expectedSignature = hash_hmac('sha256', $request->getContent(), $callbackSecret);
+            if (!hash_equals($expectedSignature, $signature)) {
+                \Log::warning('ETA payment callback invalid signature', ['ip' => $request->ip()]);
+                return response()->json(['message' => 'Invalid signature'], 401);
+            }
+        }
+
         $validated = $request->validate([
             'reference_number' => 'required|string',
             'payment_reference' => 'required|string',

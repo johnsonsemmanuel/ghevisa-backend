@@ -57,6 +57,9 @@ class PasswordResetController extends Controller
 
                 $user->save();
 
+                // HIGH-03: Revoke all existing API tokens on password reset for security
+                $user->tokens()->delete();
+
                 event(new PasswordReset($user));
             }
         );

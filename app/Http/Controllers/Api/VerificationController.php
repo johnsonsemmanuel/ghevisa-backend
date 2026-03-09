@@ -52,7 +52,7 @@ class VerificationController extends Controller
 
         // Verify passport number if provided
         if (isset($validated['passport_number'])) {
-            $passportMatch = strtoupper(trim($application->passport_number_encrypted)) === 
+            $passportMatch = strtoupper(trim($application->passport_number)) === 
                              strtoupper(trim($validated['passport_number']));
             if (!$passportMatch) {
                 return response()->json([
@@ -85,18 +85,22 @@ class VerificationController extends Controller
             }
         }
 
-        // Return verification result
+        // Return verification result with minimized PII (CRIT-08)
+        $firstName = $application->first_name ?? '';
+        $lastName = $application->last_name ?? '';
+        $maskedName = (substr($firstName, 0, 1) . str_repeat('*', max(0, strlen($firstName) - 1)))
+                    . ' '
+                    . (substr($lastName, 0, 1) . str_repeat('*', max(0, strlen($lastName) - 1)));
+
         return response()->json([
             'valid' => true,
             'message' => 'eVisa verified successfully',
             'reference_number' => $application->reference_number,
             'visa_type' => $application->visaType->name ?? null,
-            'holder_name' => $application->first_name_encrypted . ' ' . $application->last_name_encrypted,
-            'nationality' => $application->nationality_encrypted,
+            'holder_name' => $maskedName,
             'valid_from' => $application->decided_at?->format('Y-m-d'),
             'valid_until' => $application->intended_arrival?->addDays($application->duration_days)->format('Y-m-d'),
             'duration_days' => $application->duration_days,
-            'purpose' => $application->purpose_of_visit,
             'issued_at' => $application->decided_at?->toIso8601String(),
         ]);
     }
@@ -132,34 +136,79 @@ class VerificationController extends Controller
 
         $providedChecksum = $parts[2];
         
-        // Generate expected checksum
-        $data = $application->reference_number . $application->passport_number_encrypted . $application->decided_at?->timestamp;
-        $expectedChecksum = substr(hash('sha256', $data), 0, 8);
+        // Generate expected checksum using HMAC
+        $data = $application->reference_number . $application->passport_number . $application->decided_at?->timestamp;
+        $expectedChecksum = hash_hmac('sha256', $data, config('app.key'));
 
         return strtoupper($providedChecksum) === strtoupper($expectedChecksum);
     }
 
+
     /**
-     * Get eVisa status by reference number (public endpoint).
+     * Verify an eVisa by QR code (Public GET endpoint for border officers).
      */
-    public function getStatus(string $referenceNumber): JsonResponse
+    public function verifyQr(string $code): JsonResponse
     {
-        $application = Application::where('reference_number', $referenceNumber)->first();
+        // Parse the QR code format: GHEVISA:REFERENCE:CHECKSUM
+        $parts = explode(':', $code);
+        
+        if (count($parts) !== 3 || $parts[0] !== 'GHEVISA') {
+            return response()->json([
+                'valid' => false,
+                'message' => 'Invalid QR code format. This does not appear to be a valid Ghana eVisa.',
+            ]);
+        }
+
+        $reference = $parts[1];
+
+        // Find the application
+        $application = Application::where('reference_number', $reference)
+            ->whereIn('status', ['approved', 'issued'])
+            ->first();
 
         if (!$application) {
             return response()->json([
-                'found' => false,
-                'message' => 'Application not found',
-            ], 404);
+                'valid' => false,
+                'message' => 'No valid eVisa found with this reference number. The visa may have been revoked or does not exist.',
+            ]);
         }
 
+        // Verify checksum using the shared method
+        if (!$this->verifyChecksum($code, $application)) {
+            return response()->json([
+                'valid' => false,
+                'message' => 'Document verification failed. The QR code checksum does not match. This document may have been tampered with.',
+            ]);
+        }
+
+        // Check if visa is still valid (if valid_until date exists)
+        if ($application->intended_arrival && $application->duration_days) {
+            $validUntil = $application->intended_arrival->copy()->addDays($application->duration_days);
+            if ($validUntil->isPast()) {
+                return response()->json([
+                    'valid' => false,
+                    'message' => 'This eVisa has expired. The validity period ended on ' . $validUntil->format('d M Y') . '.',
+                ]);
+            }
+        }
+
+        // Return verified application data
         return response()->json([
-            'found' => true,
-            'reference_number' => $application->reference_number,
-            'status' => $application->status,
-            'visa_type' => $application->visaType->name ?? null,
-            'submitted_at' => $application->submitted_at?->toIso8601String(),
-            'decided_at' => $application->decided_at?->toIso8601String(),
+            'valid' => true,
+            'application' => [
+                'reference_number' => $application->reference_number,
+                'full_name' => $application->first_name . ' ' . $application->last_name,
+                'passport_number' => $application->passport_number,
+                'nationality' => $application->nationality,
+                'visa_type' => $application->visaType->name ?? 'N/A',
+                'arrival_date' => $application->intended_arrival ? $application->intended_arrival->format('d M Y') : 'N/A',
+                'duration_days' => $application->duration_days ?? 0,
+                'issued_at' => $application->decided_at ? $application->decided_at->format('d M Y') : 'N/A',
+                'valid_until' => $application->intended_arrival && $application->duration_days 
+                    ? $application->intended_arrival->copy()->addDays($application->duration_days)->format('d M Y') 
+                    : 'N/A',
+                'status' => $application->status,
+            ],
         ]);
     }
 }

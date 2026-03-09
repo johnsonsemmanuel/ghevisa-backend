@@ -119,6 +119,23 @@ class GcbPaymentController extends Controller
      */
     public function callback(Request $request): JsonResponse
     {
+        // CRIT-12: Verify GCB callback signature
+        $signature = $request->header('X-GCB-Signature');
+        $gcbSecret = config('services.gcb.callback_secret');
+
+        if ($gcbSecret) {
+            if (!$signature) {
+                Log::warning('GCB callback missing signature', ['ip' => $request->ip()]);
+                return response()->json(['error' => 'Missing signature'], 401);
+            }
+
+            $expectedSignature = hash_hmac('sha256', $request->getContent(), $gcbSecret);
+            if (!hash_equals($expectedSignature, $signature)) {
+                Log::warning('GCB callback invalid signature', ['ip' => $request->ip()]);
+                return response()->json(['error' => 'Invalid signature'], 401);
+            }
+        }
+
         Log::info('GCB Callback received', $request->all());
 
         $result = $this->gcbService->processCallback($request->all());

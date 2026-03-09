@@ -21,6 +21,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'robust.throttle' => \App\Http\Middleware\RobustRateLimiting::class,
         ]);
 
+        // Security headers for all responses
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+
+        // FIX-20: Strip HTML/script tags from all text inputs
+        $middleware->append(\App\Http\Middleware\SanitizeInput::class);
+
         // Rate limiting for API routes
         $middleware->throttleApi('60,1'); // 60 requests per minute
 

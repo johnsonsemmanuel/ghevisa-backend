@@ -38,7 +38,10 @@ class AuthController extends Controller
 
         // Generate verification token and send email
         $verificationToken = bin2hex(random_bytes(32));
-        $user->update(['email_verification_token' => $verificationToken]);
+        $user->update([
+            'email_verification_token' => $verificationToken,
+            'email_verification_expires_at' => now()->addHours(24),
+        ]);
 
         \App\Jobs\SendEmailVerification::dispatch($user);
 
@@ -179,9 +182,17 @@ class AuthController extends Controller
             ], 422);
         }
 
+        // HIGH-02: Enforce token expiry (24 hours)
+        if ($user->email_verification_expires_at && now()->greaterThan($user->email_verification_expires_at)) {
+            return response()->json([
+                'message' => 'Verification token has expired. Please request a new one.',
+            ], 422);
+        }
+
         $user->update([
             'email_verified_at' => now(),
             'email_verification_token' => null,
+            'email_verification_expires_at' => null,
         ]);
 
         return response()->json([
@@ -203,7 +214,10 @@ class AuthController extends Controller
         }
 
         $verificationToken = bin2hex(random_bytes(32));
-        $user->update(['email_verification_token' => $verificationToken]);
+        $user->update([
+            'email_verification_token' => $verificationToken,
+            'email_verification_expires_at' => now()->addHours(24),
+        ]);
 
         \App\Jobs\SendEmailVerification::dispatch($user);
 
