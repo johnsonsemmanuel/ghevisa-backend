@@ -13,10 +13,13 @@ class GcbPaymentService
     protected string $baseUrl;
     protected string $apiKey;
 
+    protected bool $testMode;
+
     public function __construct()
     {
         $this->baseUrl = config('services.gcb.base_url', 'https://epayuat.gcbltd.com:98/paymentgateway');
         $this->apiKey = config('services.gcb.api_key', '');
+        $this->testMode = config('services.gcb.test_mode', empty($this->apiKey));
     }
 
     /**
@@ -36,15 +39,75 @@ class GcbPaymentService
             'callbackUrl' => $callbackUrl,
         ];
 
+        // Test mode: Return mock response when API key is not configured
+        if ($this->testMode) {
+            Log::warning('GCB Test Mode: Generating mock checkout URL', [
+                'application_id' => $application->id,
+                'merchant_ref' => $merchantRef,
+            ]);
+
+            $checkoutId = 'TEST_' . strtoupper(Str::random(16));
+            $mockCheckoutUrl = config('app.frontend_url') . '/payment/gcb-test?merchantRef=' . $merchantRef . '&checkoutId=' . $checkoutId;
+
+            // Create payment record
+            $payment = Payment::updateOrCreate(
+                ['application_id' => $application->id],
+                [
+                    'merchant_ref' => $merchantRef,
+                    'checkout_id' => $checkoutId,
+                    'checkout_url' => $mockCheckoutUrl,
+                    'amount' => $amount,
+                    'currency' => 'GHS',
+                    'status' => 'pending',
+                    'gateway' => 'gcb',
+                    'gateway_response' => [
+                        'test_mode' => true,
+                        'checkOutId' => $checkoutId,
+                        'checkOutUrl' => $mockCheckoutUrl,
+                    ],
+                ]
+            );
+
+            return [
+                'success' => true,
+                'checkout_url' => $mockCheckoutUrl,
+                'checkout_id' => $checkoutId,
+                'merchant_ref' => $merchantRef,
+                'payment_id' => $payment->id,
+                'test_mode' => true,
+            ];
+        }
+
         try {
-            $response = Http::withHeaders([
+            Log::info('GCB Checkout request', [
+                'application_id' => $application->id,
+                'merchant_ref' => $merchantRef,
+                'amount' => $amount,
+                'payload' => $payload,
+            ]);
+
+            $response = Http::timeout(30)->withHeaders([
                 'X-Api-Key' => $this->apiKey,
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
             ])->post("{$this->baseUrl}/checkout", $payload);
 
+            Log::info('GCB Checkout response', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
             if ($response->successful()) {
                 $data = $response->json();
+
+                // Validate required fields in response
+                if (empty($data['checkOutUrl'])) {
+                    Log::error('GCB Checkout missing checkOutUrl', ['response' => $data]);
+                    return [
+                        'success' => false,
+                        'error' => 'Payment gateway returned invalid response',
+                    ];
+                }
 
                 // Create or update payment record
                 $payment = Payment::updateOrCreate(
@@ -65,36 +128,53 @@ class GcbPaymentService
                     'application_id' => $application->id,
                     'merchant_ref' => $merchantRef,
                     'checkout_id' => $data['checkOutId'] ?? null,
+                    'checkout_url' => $data['checkOutUrl'] ?? null,
                 ]);
 
                 return [
                     'success' => true,
-                    'checkout_url' => $data['checkOutUrl'] ?? null,
+                    'checkout_url' => $data['checkOutUrl'],
                     'checkout_id' => $data['checkOutId'] ?? null,
                     'merchant_ref' => $merchantRef,
                     'payment_id' => $payment->id,
                 ];
             }
 
+            // Handle error responses
+            $errorData = $response->json();
+            $errorMessage = $errorData['message'] ?? $errorData['error'] ?? 'Unknown error';
+            
             Log::error('GCB Checkout failed', [
                 'application_id' => $application->id,
                 'status' => $response->status(),
                 'response' => $response->body(),
+                'error_message' => $errorMessage,
             ]);
 
             return [
                 'success' => false,
-                'error' => 'Payment gateway error: ' . ($response->json('message') ?? 'Unknown error'),
+                'error' => 'Payment gateway error: ' . $errorMessage,
             ];
-        } catch (\Exception $e) {
-            Log::error('GCB Checkout exception', [
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('GCB Checkout connection failed', [
                 'application_id' => $application->id,
                 'error' => $e->getMessage(),
             ]);
 
             return [
                 'success' => false,
-                'error' => 'Payment gateway connection failed',
+                'error' => 'Unable to connect to payment gateway. Please try again.',
+            ];
+        } catch (\Exception $e) {
+            Log::error('GCB Checkout exception', [
+                'application_id' => $application->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'error' => 'Payment gateway error: ' . $e->getMessage(),
             ];
         }
     }

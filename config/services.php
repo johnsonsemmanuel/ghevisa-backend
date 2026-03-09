@@ -76,6 +76,7 @@ return [
         'base_url' => env('GCB_BASE_URL', 'https://epayuat.gcbltd.com:98/paymentgateway'),
         'api_key' => env('GCB_API_KEY', ''),
         'callback_url' => env('GCB_CALLBACK_URL', ''),
+        'test_mode' => env('GCB_TEST_MODE', true), // Enable test mode when API key is not configured
     ],
 
     'openai' => [
