@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Application;
 use App\Models\Payment;
 use App\Models\User;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -87,28 +88,73 @@ class AdminAiAssistantService
         $context['period'] = $period;
 
         // Application statistics
-        if ($this->matchesKeywords($query, ['application', 'applications', 'visa', 'visas', 'submitted', 'total', 'how many', 'count'])) {
+        if ($this->matchesKeywords($query, ['application', 'applications', 'visa', 'visas', 'submitted', 'total', 'how many', 'count', 'statistics', 'stats'])) {
             $context['applications'] = [
                 'total' => Application::whereBetween('created_at', [$startDate, $endDate])->count(),
                 'by_status' => Application::whereBetween('created_at', [$startDate, $endDate])
-                    ->select('status', DB::raw('COUNT(*) as count'))
                     ->groupBy('status')
                     ->pluck('count', 'status')
                     ->toArray(),
                 'pending' => Application::whereIn('status', ['submitted', 'under_review', 'pending_approval'])->count(),
             ];
+            
+            // Also include country statistics for general statistics queries
+            $encryptedNationalities = DB::table('applications')
+                ->whereBetween('created_at', [$startDate, $endDate])
+                ->whereNotNull('nationality_encrypted')
+                ->pluck('nationality_encrypted');
+            
+            $countryCounts = [];
+            foreach ($encryptedNationalities as $encrypted) {
+                try {
+                    $countryCode = Crypt::decryptString($encrypted);
+                    $countryName = $this->getCountryName($countryCode);
+                    $countryCounts[$countryName] = ($countryCounts[$countryName] ?? 0) + 1;
+                } catch (\Exception $e) {
+                    // If decryption fails, skip this record
+                    continue;
+                }
+            }
+            
+            // Sort by count descending
+            arsort($countryCounts);
+            
+            // Convert to array format expected by response formatter
+            $visitors = [];
+            foreach ($countryCounts as $country => $count) {
+                $visitors[] = ['country' => $country, 'count' => $count];
+            }
+            $context['visitors_by_country'] = array_slice($visitors, 0, 20);
         }
 
         // Visitor/Country statistics
         if ($this->matchesKeywords($query, ['visitor', 'visitors', 'country', 'countries', 'nationality', 'nationalities', 'where', 'coming from'])) {
-            $context['visitors_by_country'] = Application::whereBetween('created_at', [$startDate, $endDate])
-                ->select('nationality_encrypted as country', DB::raw('COUNT(*) as count'))
-                ->groupBy('nationality_encrypted')
-                ->orderByDesc('count')
-                ->limit(20)
-                ->get()
-                ->map(fn($item) => ['country' => $item->country, 'count' => $item->count])
-                ->toArray();
+            $encryptedNationalities = DB::table('applications')
+                ->whereBetween('created_at', [$startDate, $endDate])
+                ->whereNotNull('nationality_encrypted')
+                ->pluck('nationality_encrypted');
+            
+            $countryCounts = [];
+            foreach ($encryptedNationalities as $encrypted) {
+                try {
+                    $countryCode = Crypt::decryptString($encrypted);
+                    $countryName = $this->getCountryName($countryCode);
+                    $countryCounts[$countryName] = ($countryCounts[$countryName] ?? 0) + 1;
+                } catch (\Exception $e) {
+                    // If decryption fails, skip this record
+                    continue;
+                }
+            }
+            
+            // Sort by count descending
+            arsort($countryCounts);
+            
+            // Convert to array format expected by response formatter
+            $visitors = [];
+            foreach ($countryCounts as $country => $count) {
+                $visitors[] = ['country' => $country, 'count' => $count];
+            }
+            $context['visitors_by_country'] = array_slice($visitors, 0, 20);
         }
 
         // Approval/Denial statistics
@@ -424,6 +470,153 @@ PROMPT;
             'query' => $query,
             'ai_powered' => false,
         ];
+    }
+
+    /**
+     * Convert country code to full country name
+     */
+    protected function getCountryName(string $countryCode): string
+    {
+        $countries = [
+            'GH' => 'Ghana',
+            'NG' => 'Nigeria',
+            'US' => 'United States',
+            'UK' => 'United Kingdom',
+            'CA' => 'Canada',
+            'DE' => 'Germany',
+            'FR' => 'France',
+            'IT' => 'Italy',
+            'ES' => 'Spain',
+            'NL' => 'Netherlands',
+            'IE' => 'Ireland',
+            'AU' => 'Australia',
+            'NZ' => 'New Zealand',
+            'ZA' => 'South Africa',
+            'KE' => 'Kenya',
+            'UG' => 'Uganda',
+            'TZ' => 'Tanzania',
+            'CI' => 'Ivory Coast',
+            'SN' => 'Senegal',
+            'BF' => 'Burkina Faso',
+            'ML' => 'Mali',
+            'NE' => 'Niger',
+            'TD' => 'Chad',
+            'CM' => 'Cameroon',
+            'GA' => 'Gabon',
+            'CG' => 'Congo',
+            'CD' => 'Democratic Republic of Congo',
+            'AO' => 'Angola',
+            'ZM' => 'Zambia',
+            'MW' => 'Malawi',
+            'MZ' => 'Mozambique',
+            'ZW' => 'Zimbabwe',
+            'BW' => 'Botswana',
+            'NA' => 'Namibia',
+            'SZ' => 'Eswatini',
+            'LS' => 'Lesotho',
+            'MG' => 'Madagascar',
+            'MU' => 'Mauritius',
+            'SC' => 'Seychelles',
+            'KM' => 'Comoros',
+            'RE' => 'Réunion',
+            'CV' => 'Cape Verde',
+            'ST' => 'São Tomé and Príncipe',
+            'GW' => 'Guinea-Bissau',
+            'GN' => 'Guinea',
+            'SL' => 'Sierra Leone',
+            'LR' => 'Liberia',
+            'BJ' => 'Benin',
+            'TG' => 'Togo',
+            'GM' => 'Gambia',
+            'MR' => 'Mauritania',
+            'DZ' => 'Algeria',
+            'TN' => 'Tunisia',
+            'LY' => 'Libya',
+            'EG' => 'Egypt',
+            'SD' => 'Sudan',
+            'ET' => 'Ethiopia',
+            'ER' => 'Eritrea',
+            'DJ' => 'Djibouti',
+            'SO' => 'Somalia',
+            'IN' => 'India',
+            'PK' => 'Pakistan',
+            'BD' => 'Bangladesh',
+            'LK' => 'Sri Lanka',
+            'NP' => 'Nepal',
+            'BT' => 'Bhutan',
+            'MM' => 'Myanmar',
+            'TH' => 'Thailand',
+            'VN' => 'Vietnam',
+            'KH' => 'Cambodia',
+            'LA' => 'Laos',
+            'PH' => 'Philippines',
+            'MY' => 'Malaysia',
+            'SG' => 'Singapore',
+            'ID' => 'Indonesia',
+            'BN' => 'Brunei',
+            'TL' => 'Timor-Leste',
+            'CN' => 'China',
+            'JP' => 'Japan',
+            'KR' => 'South Korea',
+            'KP' => 'North Korea',
+            'MN' => 'Mongolia',
+            'RU' => 'Russia',
+            'UA' => 'Ukraine',
+            'BY' => 'Belarus',
+            'PL' => 'Poland',
+            'CZ' => 'Czech Republic',
+            'SK' => 'Slovakia',
+            'HU' => 'Hungary',
+            'RO' => 'Romania',
+            'BG' => 'Bulgaria',
+            'RS' => 'Serbia',
+            'HR' => 'Croatia',
+            'BA' => 'Bosnia and Herzegovina',
+            'ME' => 'Montenegro',
+            'MK' => 'North Macedonia',
+            'AL' => 'Albania',
+            'GR' => 'Greece',
+            'TR' => 'Turkey',
+            'CY' => 'Cyprus',
+            'IL' => 'Israel',
+            'JO' => 'Jordan',
+            'SY' => 'Syria',
+            'LB' => 'Lebanon',
+            'IQ' => 'Iraq',
+            'IR' => 'Iran',
+            'AF' => 'Afghanistan',
+            'PK' => 'Pakistan',
+            'SA' => 'Saudi Arabia',
+            'YE' => 'Yemen',
+            'OM' => 'Oman',
+            'AE' => 'United Arab Emirates',
+            'QA' => 'Qatar',
+            'BH' => 'Bahrain',
+            'KW' => 'Kuwait',
+            'MX' => 'Mexico',
+            'GT' => 'Guatemala',
+            'BZ' => 'Belize',
+            'SV' => 'El Salvador',
+            'HN' => 'Honduras',
+            'NI' => 'Nicaragua',
+            'CR' => 'Costa Rica',
+            'PA' => 'Panama',
+            'CO' => 'Colombia',
+            'VE' => 'Venezuela',
+            'EC' => 'Ecuador',
+            'PE' => 'Peru',
+            'BO' => 'Bolivia',
+            'CL' => 'Chile',
+            'AR' => 'Argentina',
+            'UY' => 'Uruguay',
+            'PY' => 'Paraguay',
+            'BR' => 'Brazil',
+            'GY' => 'Guyana',
+            'SR' => 'Suriname',
+            'GF' => 'French Guiana',
+        ];
+
+        return $countries[strtoupper($countryCode)] ?? $countryCode;
     }
 
     /**
