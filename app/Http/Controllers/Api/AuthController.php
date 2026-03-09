@@ -34,15 +34,19 @@ class AuthController extends Controller
             'phone'      => $validated['phone'] ?? null,
             'role'       => 'applicant',
             'locale'     => $validated['locale'] ?? 'en',
-            'email_verified_at' => now(), // Auto-verify
         ]);
 
-        $token = $user->createToken('applicant-token')->plainTextToken;
+        // Generate verification token and send email
+        $verificationToken = bin2hex(random_bytes(32));
+        $user->update(['email_verification_token' => $verificationToken]);
+
+        \App\Jobs\SendEmailVerification::dispatch($user);
 
         return response()->json([
-            'message' => __('auth.registered'),
+            'message' => 'Registration successful! Please check your email to verify your account.',
+            'requires_email_verification' => true,
+            'email' => $user->email,
             'user'    => $this->userResource($user),
-            'token'   => $token,
         ], 201);
     }
 
@@ -67,6 +71,15 @@ class AuthController extends Controller
         if (!$user->is_active) {
             return response()->json([
                 'message' => __('auth.account_deactivated'),
+            ], 403);
+        }
+
+        // Check if email is verified
+        if (!$user->email_verified_at) {
+            return response()->json([
+                'message' => 'Please verify your email address before logging in. Check your inbox for the verification email.',
+                'requires_email_verification' => true,
+                'email' => $user->email,
             ], 403);
         }
 
