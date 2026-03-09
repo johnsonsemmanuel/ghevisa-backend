@@ -76,6 +76,7 @@ class MultiPaymentService
         return match ($paymentMethod) {
             'paystack_card', 'paystack_mobile_money' => $this->initializePaystack($application, $amount, $currency, $paymentMethod, $callbackUrl),
             'stripe_card' => $this->initializeStripe($application, $amount, $currency, $callbackUrl),
+            'gcb_payment' => $this->initializeGcb($application, $amount, $currency, $callbackUrl),
             'bank_transfer' => $this->initializeBankTransfer($application, $amount, $currency),
             default => ['success' => false, 'message' => 'Invalid payment method'],
         };
@@ -215,6 +216,41 @@ class MultiPaymentService
         } catch (\Exception $e) {
             Log::error('Stripe error: ' . $e->getMessage());
             return ['success' => false, 'message' => 'Payment service unavailable'];
+        }
+    }
+
+    /**
+     * Initialize GCB payment.
+     */
+    protected function initializeGcb(
+        Application $application,
+        float $amount,
+        string $currency,
+        ?string $callbackUrl
+    ): array {
+        try {
+            $gcbService = app(\App\Services\GcbPaymentService::class);
+            $result = $gcbService->initiateCheckout($application, $callbackUrl ?? config('app.frontend_url') . '/payment/callback');
+
+            if ($result['success']) {
+                // Update application status to pending_payment
+                if (in_array($application->status, ['draft', 'submitted_awaiting_payment'])) {
+                    $application->update(['status' => 'pending_payment']);
+                }
+
+                return [
+                    'success' => true,
+                    'provider' => 'gcb',
+                    'authorization_url' => $result['checkout_url'],
+                    'checkout_id' => $result['checkout_id'],
+                    'merchant_ref' => $result['merchant_ref'],
+                ];
+            }
+
+            return ['success' => false, 'message' => $result['error'] ?? 'GCB payment initialization failed'];
+        } catch (\Exception $e) {
+            Log::error('GCB payment error: ' . $e->getMessage());
+            return ['success' => false, 'message' => 'GCB payment service unavailable'];
         }
     }
 
