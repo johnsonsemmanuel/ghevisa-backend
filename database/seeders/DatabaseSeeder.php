@@ -212,6 +212,7 @@ class DatabaseSeeder extends Seeder
             'agency'     => 'ADMIN',
             'is_active'  => true,
             'locale'     => 'en',
+            'email_verified_at' => now(),
         ]);
 
         User::create([
@@ -223,6 +224,7 @@ class DatabaseSeeder extends Seeder
             'agency'     => 'GIS',
             'is_active'  => true,
             'locale'     => 'en',
+            'email_verified_at' => now(),
         ]);
 
         User::create([
@@ -234,6 +236,7 @@ class DatabaseSeeder extends Seeder
             'agency'     => 'MFA',
             'is_active'  => true,
             'locale'     => 'en',
+            'email_verified_at' => now(),
         ]);
 
         User::create([
@@ -245,6 +248,7 @@ class DatabaseSeeder extends Seeder
             'agency'     => null,
             'is_active'  => true,
             'locale'     => 'en',
+            'email_verified_at' => now(),
         ]);
 
         User::create([
@@ -256,6 +260,7 @@ class DatabaseSeeder extends Seeder
             'agency'     => 'GIS',
             'is_active'  => true,
             'locale'     => 'en',
+            'email_verified_at' => now(),
         ]);
 
         User::create([
@@ -267,6 +272,7 @@ class DatabaseSeeder extends Seeder
             'agency'     => 'GIS',
             'is_active'  => true,
             'locale'     => 'en',
+            'email_verified_at' => now(),
         ]);
     }
 }
