@@ -181,7 +181,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 365,
                 'entry_type' => 'multiple',
                 'validity_period' => '1 year (renewable)',
-                'category' => 'visa',
+                'type' => 'visa',
                 'sort_order' => 3,
                 'required_documents' => ['passport_bio', 'photo', 'admission_letter', 'financial_proof'],
                 'required_fields' => [
@@ -204,7 +204,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 365,
                 'entry_type' => 'multiple',
                 'validity_period' => '1-2 years',
-                'category' => 'visa',
+                'type' => 'visa',
                 'sort_order' => 4,
                 'required_documents' => ['passport_bio', 'photo', 'employment_contract', 'company_letter', 'qualifications'],
                 'required_fields' => [
@@ -227,7 +227,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 3,
                 'entry_type' => 'single',
                 'validity_period' => '72 hours',
-                'category' => 'visa',
+                'type' => 'visa',
                 'sort_order' => 5,
                 'required_documents' => ['passport_bio', 'photo', 'onward_ticket'],
                 'required_fields' => [
@@ -249,7 +249,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 180,
                 'entry_type' => 'single',
                 'validity_period' => '90-180 days',
-                'category' => 'visa',
+                'type' => 'visa',
                 'sort_order' => 6,
                 'required_documents' => ['passport_bio', 'photo', 'hospital_letter', 'medical_records'],
                 'required_fields' => [
@@ -272,7 +272,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 30,
                 'entry_type' => 'single',
                 'validity_period' => '14-30 days',
-                'category' => 'visa',
+                'type' => 'visa',
                 'sort_order' => 7,
                 'required_documents' => ['passport_bio', 'photo', 'conference_invitation', 'registration_confirmation'],
                 'required_fields' => [
@@ -295,7 +295,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 365,
                 'entry_type' => 'multiple',
                 'validity_period' => 'Duration of posting',
-                'category' => 'visa',
+                'type' => 'visa',
                 'sort_order' => 8,
                 'required_documents' => ['diplomatic_passport', 'photo', 'diplomatic_note'],
                 'required_fields' => [
@@ -318,7 +318,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 30,
                 'entry_type' => 'single',
                 'validity_period' => '14-30 days',
-                'category' => 'visa',
+                'type' => 'visa',
                 'sort_order' => 9,
                 'required_documents' => ['passport_bio', 'photo', 'emergency_proof'],
                 'required_fields' => [
@@ -341,7 +341,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 90,
                 'entry_type' => 'multiple',
                 'validity_period' => '90 days',
-                'category' => 'eta',
+                'type' => 'eta',
                 'sort_order' => 10,
                 'required_documents' => ['passport_bio', 'photo'],
                 'required_fields' => [
@@ -366,7 +366,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 30,
                 'entry_type' => 'single',
                 'validity_period' => '30 days',
-                'category' => 'eta',
+                'type' => 'eta',
                 'sort_order' => 11,
                 'required_documents' => ['passport_bio', 'photo'],
                 'required_fields' => [
@@ -398,7 +398,7 @@ class Phase1Seeder extends Seeder
                 'max_duration_days' => 90,
                 'entry_type' => 'single',
                 'validity_period' => '90 days',
-                'category' => 'eta',
+                'type' => 'eta',
                 'sort_order' => 12,
                 'required_documents' => ['passport_bio', 'photo'],
                 'required_fields' => [

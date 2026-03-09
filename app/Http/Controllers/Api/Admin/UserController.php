@@ -49,7 +49,7 @@ class UserController extends Controller
         // Add statistics based on role
         if ($user->role === 'applicant') {
             $data['applications_count'] = $user->applications()->count();
-        } elseif (in_array($user->role, ['gis_officer', 'mfa_reviewer'])) {
+        } elseif (in_array($user->role, ['gis_officer', 'gis_reviewer', 'gis_approver', 'gis_admin', 'mfa_reviewer', 'mfa_approver', 'mfa_admin', 'admin'])) {
             $data['assigned_cases_count'] = \App\Models\Application::where('assigned_officer_id', $user->id)->count();
         }
 
@@ -66,7 +66,7 @@ class UserController extends Controller
             'last_name'  => 'required|string|max:255',
             'email'      => 'required|email|unique:users,email',
             'password'   => ['required', Password::min(8)->mixedCase()->numbers()],
-            'role'       => 'required|in:gis_officer,mfa_reviewer,admin',
+            'role'       => 'required|in:gis_officer,gis_reviewer,gis_approver,gis_admin,mfa_reviewer,mfa_approver,mfa_admin,admin',
             'agency'     => 'required|in:GIS,MFA,ADMIN',
             'phone'      => 'nullable|string|max:20',
             'locale'     => 'nullable|in:en,fr',
@@ -98,7 +98,7 @@ class UserController extends Controller
             'first_name' => 'sometimes|string|max:255',
             'last_name'  => 'sometimes|string|max:255',
             'email'      => "sometimes|email|unique:users,email,{$user->id}",
-            'role'       => 'sometimes|in:applicant,gis_officer,mfa_reviewer,admin',
+            'role'       => 'sometimes|in:applicant,gis_officer,gis_reviewer,gis_approver,gis_admin,mfa_reviewer,mfa_approver,mfa_admin,admin',
             'agency'     => 'sometimes|in:GIS,MFA,ADMIN',
             'is_active'  => 'sometimes|boolean',
             'locale'     => 'sometimes|in:en,fr',

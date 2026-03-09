@@ -97,7 +97,7 @@ class EscalationController extends Controller
                 WHEN status = 'under_review' THEN 3
                 ELSE 4
             END
-        ")->orderBy('sla_deadline', 'asc')
+        ")->orderBy('created_at', 'desc')
             ->paginate(20);
 
         return response()->json($applications);
@@ -117,6 +117,9 @@ class EscalationController extends Controller
             'internalNotes.user',
             'payment',
             'user:id,first_name,last_name,email',
+            'assignedOfficer:id,first_name,last_name,email',
+            'reviewingOfficer:id,first_name,last_name,email',
+            'approvalOfficer:id,first_name,last_name,email',
             'riskAssessment',
         ]);
 
@@ -154,6 +157,7 @@ class EscalationController extends Controller
         $application->update([
             'reviewed_by_id' => $request->user()->id,
             'reviewed_at' => now(),
+            'reviewing_officer_id' => $request->user()->id,
             'current_queue' => 'approval_queue',
         ]);
 
@@ -190,6 +194,12 @@ class EscalationController extends Controller
             return response()->json(['message' => __('case.invalid_status_for_approval')], 422);
         }
 
+        $application->update([
+            'approval_officer_id' => $request->user()->id,
+            'approval_started_at' => $application->approval_started_at ?? now(),
+            'approval_completed_at' => now(),
+        ]);
+
         $this->applicationService->changeStatus($application, 'approved', $validated['notes'] ?? 'Approved by MFA');
 
         // FIX-17/ARCH-03: Queue PDF generation instead of synchronous
@@ -223,6 +233,12 @@ class EscalationController extends Controller
         if ($application->status !== 'pending_approval') {
             return response()->json(['message' => 'Application must be in pending_approval status to deny'], 422);
         }
+
+        $application->update([
+            'approval_officer_id' => $request->user()->id,
+            'approval_started_at' => $application->approval_started_at ?? now(),
+            'approval_completed_at' => now(),
+        ]);
 
         $this->applicationService->changeStatus($application, 'denied', $validated['notes']);
 

@@ -177,7 +177,7 @@ class EtaEligibilityService
     {
         $nationality = strtoupper($nationality);
 
-        return VisaType::where('category', 'eta')
+        return VisaType::where('type', 'eta')
             ->where('is_active', true)
             ->get()
             ->filter(function ($type) use ($nationality) {

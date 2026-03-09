@@ -84,34 +84,16 @@ class PaymentController extends Controller
 
         $payment = $result['payment'] ?? Payment::where('transaction_reference', $reference)->first();
 
-        // If successful, check if we need to manually trigger submission
-        if ($result['success'] && $payment && $payment->status === 'completed') {
-            $application = $payment->application;
-            
-            if ($application) {
-                $application->refresh();
-                
-                if (in_array($application->status, ['paid_submitted', 'submitted_awaiting_payment', 'pending_payment', 'draft'])) {
-                    try {
-                        $this->applicationService->submit($application);
-                        Log::info('Payment verified and application submitted', [
-                            'payment_id' => $payment->id,
-                            'application_id' => $application->id,
-                            'reference' => $reference,
-                            'new_status' => $application->fresh()->status,
-                        ]);
-                    } catch (\Exception $e) {
-                         Log::error('App submission failed after payment: ' . $e->getMessage());
-                    }
-                }
-            }
-        }
+        // MultiPaymentService::onPaymentSuccess already handles submission and routing
+        // No need to duplicate submission logic here
 
         return response()->json([
             'success' => $result['success'],
             'status' => $result['status'] ?? ($payment ? $payment->status : 'failed'),
             'message' => $result['success'] ? 'Payment verified successfully' : 'Payment verification failed',
             'application_status' => $payment->application->status ?? null,
+            'application_id' => $payment?->application_id,
+            'reference_number' => $payment?->application?->reference_number,
         ]);
     }
 

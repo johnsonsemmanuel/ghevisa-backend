@@ -27,7 +27,7 @@ class EtaController extends Controller
         $authType = $eligibilityService->getAuthorizationType($nationality);
 
         // Get ETA types where nationality is eligible
-        $etaTypes = VisaType::where('category', 'eta')
+        $etaTypes = VisaType::where('type', 'eta')
             ->where('is_active', true)
             ->get()
             ->filter(function ($type) use ($nationality) {
@@ -82,7 +82,7 @@ class EtaController extends Controller
 
         // Verify visa type is ETA
         $visaType = VisaType::findOrFail($validated['visa_type_id']);
-        if ($visaType->category !== 'eta') {
+        if ($visaType->type !== 'eta') {
             return response()->json(['message' => 'Invalid ETA type'], 422);
         }
 

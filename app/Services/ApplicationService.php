@@ -14,7 +14,6 @@ class ApplicationService
 {
     public function __construct(
         protected ApplicationRoutingService $routingService,
-        protected PaymentService $paymentService,
     ) {}
 
     /**
@@ -63,7 +62,7 @@ class ApplicationService
         $fillable = [];
 
         switch ($step) {
-            case 1: // Visa Category (channel, type, entry, tier)
+            case 1: // Personal Details
                 if (isset($data['visa_channel'])) $fillable['visa_channel'] = $data['visa_channel'];
                 if (isset($data['entry_type'])) $fillable['entry_type'] = $data['entry_type'];
                 if (isset($data['service_tier_id'])) $fillable['service_tier_id'] = $data['service_tier_id'];
@@ -87,14 +86,36 @@ class ApplicationService
                 ];
                 break;
 
-            case 3: // Travel Info
-                $fillable = [
-                    'intended_arrival'  => $data['intended_arrival'] ?? $application->intended_arrival,
-                    'duration_days'     => $data['duration_days'] ?? $application->duration_days,
-                    'visa_duration'     => $data['visa_duration'] ?? $application->visa_duration,
-                    'address_in_ghana'  => $data['address_in_ghana'] ?? $application->address_in_ghana,
-                    'purpose_of_visit'  => $data['purpose_of_visit'] ?? $application->purpose_of_visit,
+            case 3: // Travel Details
+                $fillable = [];
+                
+                // Only use data if it's explicitly provided in the request
+                if (isset($data['intended_arrival'])) {
+                    $fillable['intended_arrival'] = $data['intended_arrival'];
+                }
+                if (isset($data['duration_days'])) {
+                    $fillable['duration_days'] = $data['duration_days'];
+                }
+                if (isset($data['visa_duration'])) {
+                    $fillable['visa_duration'] = $data['visa_duration'];
+                }
+                if (isset($data['address_in_ghana'])) {
+                    $fillable['address_in_ghana'] = $data['address_in_ghana'];
+                }
+                if (isset($data['purpose_of_visit'])) {
+                    $fillable['purpose_of_visit'] = $data['purpose_of_visit'];
+                }
+                
+                // ETA-specific fields
+                $etaFields = [
+                    'airline', 'flight_number', 'host_name', 'host_phone', 
+                    'hotel_booking_reference', 'authorization_type'
                 ];
+                foreach ($etaFields as $f) {
+                    if (isset($data[$f])) {
+                        $fillable[$f] = $data[$f];
+                    }
+                }
                 
                 // Dynamically save any field passed in Step 3 that exists on the model
                 $step3DynamicFields = [
@@ -102,18 +123,46 @@ class ApplicationService
                     'visited_other_countries', 'visited_country_1', 'visited_country_2', 'visited_country_3'
                 ];
                 foreach ($step3DynamicFields as $f) {
-                    if (isset($data[$f])) $fillable[$f] = $data[$f];
+                    if (isset($data[$f])) {
+                        $fillable[$f] = $data[$f];
+                    }
                 }
-                if (isset($data['passport_expiry'])) $fillable['passport_expiry'] = $data['passport_expiry'];
+                if (isset($data['passport_expiry'])) {
+                    $fillable['passport_expiry'] = $data['passport_expiry'];
+                }
                 break;
 
             case 4: // Documents (handled via DocumentService)
                 break;
 
-            case 5: // Declaration
+            case 5: // Health Declaration
+                $fillable = [
+                    'health_good_condition' => $data['health_good_condition'] ?? $application->health_good_condition,
+                    'health_recent_illness' => $data['health_recent_illness'] ?? $application->health_recent_illness,
+                    'health_contact_infectious' => $data['health_contact_infectious'] ?? $application->health_contact_infectious,
+                    'health_yellow_fever_vaccinated' => $data['health_yellow_fever_vaccinated'] ?? $application->health_yellow_fever_vaccinated,
+                    'health_chronic_conditions' => $data['health_chronic_conditions'] ?? $application->health_chronic_conditions,
+                    'health_condition_details' => $data['health_condition_details'] ?? $application->health_condition_details,
+                ];
                 break;
 
-            case 6: // Review & Submit
+            case 6: // Security Declaration
+                // Handle security declaration fields (including ETA-specific ones)
+                $securityFields = [
+                    'entry_denied_before',
+                    'criminal_conviction',
+                    'previous_ghana_visa',
+                    'travel_history'
+                ];
+                
+                foreach ($securityFields as $field) {
+                    if (isset($data[$field])) {
+                        $fillable[$field] = $data[$field];
+                    }
+                }
+                break;
+
+            case 7: // Review & Submit
                 break;
         }
 

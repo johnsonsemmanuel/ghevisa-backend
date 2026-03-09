@@ -110,4 +110,27 @@ class ApplicationRoutingServiceTest extends TestCase
         $this->assertEquals('under_review', $returnedApp->status);
         $this->assertNull($returnedApp->assigned_officer_id);
     }
+
+    /** @test */
+    public function it_sets_sla_deadline_for_all_review_statuses()
+    {
+        $statusesThatRequireSla = ['under_review', 'pending_approval', 'additional_info_requested'];
+        
+        foreach ($statusesThatRequireSla as $status) {
+            $application = Application::factory()->create([
+                'visa_channel' => 'e-visa',
+                'processing_tier' => 'fast_track',
+            ]);
+
+            // Manually set status to simulate routing outcome
+            $application->status = $status;
+            $application->assigned_agency = 'gis';
+            $application->current_queue = $status === 'pending_approval' ? 'approval_queue' : 'review_queue';
+            $application->save();
+
+            // Ensure SLA deadline is set for all review statuses
+            $this->assertNotNull($application->sla_deadline, "SLA deadline should be set for status: {$status}");
+            $this->assertGreaterThan(now(), $application->sla_deadline, "SLA deadline should be in the future for status: {$status}");
+        }
+    }
 }

@@ -100,21 +100,28 @@ class ApplicationRoutingService
     }
 
     /**
-     * Determine agency based on visa_channel and processing_tier.
+     * Determine agency based on visa_channel, processing_tier, and authorization_type.
      *
      * Spec rules:
-     *   IF visa_channel = regular           → MFA
+     *   IF authorization_type = eta           → GIS (fast-track)
+     *   IF visa_channel = regular             → MFA
      *   ELSE IF visa_channel = e-visa AND processing_tier = standard → MFA
-     *   ELSE                                → GIS
+     *   ELSE                                  → GIS
      */
     protected function determineAgency(Application $application): string
     {
         $channel = $application->visa_channel ?? 'e-visa';
         $tier = $application->processing_tier ?? 'standard';
+        $authType = $application->authorization_type;
 
         // Also resolve tier from service_tier relation if processing_tier not set
         if (!$application->processing_tier && $application->serviceTier) {
             $tier = $application->serviceTier->code ?? 'standard';
+        }
+
+        // Rule 0: ETA applications → always GIS (fast processing)
+        if ($authType === 'eta') {
+            return 'gis';
         }
 
         // Rule 1: Regular visa → always MFA

@@ -60,12 +60,12 @@ class EnsureRole
     {
         return match($role) {
             'gis_officer' => ['gis_officer', 'gis_reviewer', 'gis_approver', 'gis_admin'],
-            'gis_reviewer' => ['gis_reviewer', 'gis_officer'],
-            'gis_approver' => ['gis_approver', 'gis_officer'],
+            'gis_reviewer' => ['gis_reviewer', 'gis_officer', 'gis_admin'],
+            'gis_approver' => ['gis_approver', 'gis_officer', 'gis_admin'],
             'gis_admin' => ['gis_admin'],
             'mfa_officer' => ['mfa_reviewer', 'mfa_approver', 'mfa_admin'],
-            'mfa_reviewer' => ['mfa_reviewer'],
-            'mfa_approver' => ['mfa_approver'],
+            'mfa_reviewer' => ['mfa_reviewer', 'mfa_admin'],
+            'mfa_approver' => ['mfa_approver', 'mfa_admin'],
             'mfa_admin' => ['mfa_admin'],
             'admin' => ['admin'],
             'applicant' => ['applicant'],

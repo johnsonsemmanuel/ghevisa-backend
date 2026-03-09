@@ -152,14 +152,17 @@ class SendNotification implements ShouldQueue
     protected function notifyAgencyOfficers(string $message): void
     {
         $agency = $this->application->assigned_agency;
-        $roleMap = ['gis' => 'gis_officer', 'mfa' => 'mfa_reviewer'];
-        $role = $roleMap[$agency] ?? null;
+        $roleMap = [
+            'gis' => ['gis_officer', 'gis_reviewer', 'gis_approver', 'gis_admin'],
+            'mfa' => ['mfa_reviewer', 'mfa_approver', 'mfa_admin'],
+        ];
+        $roles = $roleMap[$agency] ?? [];
 
-        if (!$role) {
+        if (empty($roles)) {
             return;
         }
 
-        $officers = User::where('role', $role)->where('is_active', true)->get();
+        $officers = User::whereIn('role', $roles)->where('is_active', true)->get();
 
         foreach ($officers as $officer) {
             $officer->notify(new \App\Notifications\ApplicationNotification(

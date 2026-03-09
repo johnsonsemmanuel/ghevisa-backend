@@ -134,12 +134,9 @@ class MultiPaymentService
         $channels = $method === 'paystack_mobile_money' ? ['mobile_money'] : ['card', 'bank'];
         $baseUrl = config('services.paystack.base_url', 'https://api.paystack.co');
 
-        // Always use GHS for Paystack - convert if needed
-        $ghsAmount = $amount;
-        if ($currency !== 'GHS') {
-            $ghsRate = config('services.exchange_rates.GHS', 12.5);
-            $ghsAmount = $amount * $ghsRate;
-        }
+        // For Paystack, use the visa type base_fee directly in GHS
+        // The visa fees are stored in GHS, not USD
+        $ghsAmount = $application->visaType->base_fee ?? 260.00;
 
         $payload = [
             'email' => $application->email ?: config('services.paystack.merchant_email'),
@@ -345,6 +342,11 @@ class MultiPaymentService
         }
 
         if ($payment->status === 'completed') {
+            // Ensure onPaymentSuccess was called for proper routing
+            // This handles cases where payment was completed but application wasn't routed
+            if ($payment->application && in_array($payment->application->status, ['paid_submitted', 'submitted_awaiting_payment', 'pending_payment', 'draft'])) {
+                $this->onPaymentSuccess($payment);
+            }
             return ['success' => true, 'status' => 'completed', 'payment' => $payment];
         }
 
@@ -463,7 +465,7 @@ class MultiPaymentService
         // Allow a small tolerance for rounding issues (e.g. 0.05)
         if ($payment->amount < ($expectedAmount - 0.05)) {
             Log::error("Payment amount mismatch for application {$application->reference_number}. Paid: {$payment->amount}, Expected: {$expectedAmount}");
-            $payment->update(['status' => 'failed_amount_mismatch']);
+            $payment->update(['status' => 'failed']);
             return; // Abort processing this payment
         }
 
@@ -528,6 +530,12 @@ class MultiPaymentService
      */
     protected function calculateAmount(Application $application, string $currency): float
     {
+        // For GHS payments (Paystack), use the visa type base_fee directly
+        if ($currency === 'GHS') {
+            return $application->visaType->base_fee ?? 260.00;
+        }
+        
+        // For other currencies, use the pricing service
         $pricingService = app(\App\Services\PricingService::class);
         $pricing = $pricingService->calculatePrice($application);
         

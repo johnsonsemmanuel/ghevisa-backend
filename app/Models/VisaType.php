@@ -21,7 +21,7 @@ class VisaType extends Model
         'platform_fee',
         'entry_type',
         'validity_period',
-        'category',
+        'type',
         'max_duration_days',
         'is_active',
         'sort_order',
@@ -64,12 +64,12 @@ class VisaType extends Model
 
     public function scopeVisas($query)
     {
-        return $query->where('category', 'visa');
+        return $query->where('type', 'visa');
     }
 
     public function scopeEta($query)
     {
-        return $query->where('category', 'eta');
+        return $query->where('type', 'eta');
     }
 
     public function applications(): HasMany

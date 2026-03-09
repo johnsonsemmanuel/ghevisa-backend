@@ -21,7 +21,7 @@ class EnsureEmailVerified
         }
 
         // Staff users (GIS, MFA, Admin) don't need email verification
-        if (in_array($user->role, ['gis_officer', 'mfa_reviewer', 'admin'])) {
+        if (in_array($user->role, ['gis_officer', 'gis_reviewer', 'gis_approver', 'gis_admin', 'mfa_reviewer', 'mfa_approver', 'mfa_admin', 'admin'])) {
             return $next($request);
         }
 

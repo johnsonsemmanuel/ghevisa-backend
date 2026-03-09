@@ -40,7 +40,7 @@ class ApplicationController extends Controller
         // FIX-16/ARCH-02: Cache visa types for 1 hour
         $types = cache()->remember('visa_types_active', 3600, function () {
             return VisaType::where('is_active', true)
-                ->select('id', 'name', 'slug', 'description', 'base_fee', 'multiple_entry_fee', 'government_fee', 'platform_fee', 'entry_type', 'validity_period', 'category', 'max_duration_days', 'required_documents')
+                ->select('id', 'name', 'slug', 'description', 'base_fee', 'multiple_entry_fee', 'government_fee', 'platform_fee', 'entry_type', 'validity_period', 'type', 'max_duration_days', 'required_documents')
                 ->get();
         });
 

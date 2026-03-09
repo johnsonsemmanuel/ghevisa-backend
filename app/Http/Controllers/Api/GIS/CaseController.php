@@ -56,7 +56,7 @@ class CaseController extends Controller
                 WHEN status = 'submitted' THEN 4
                 ELSE 5
             END
-        ")->orderBy('sla_deadline', 'asc')
+        ")->orderBy('created_at', 'desc')
           ->paginate(20);
 
         return response()->json($applications);
@@ -80,6 +80,9 @@ class CaseController extends Controller
             'internalNotes.user',
             'payment',
             'user:id,first_name,last_name,email',
+            'assignedOfficer:id,first_name,last_name,email',
+            'reviewingOfficer:id,first_name,last_name,email',
+            'approvalOfficer:id,first_name,last_name,email',
             'riskAssessment',
         ]);
 
@@ -357,12 +360,33 @@ class CaseController extends Controller
             return response()->json(['message' => __('case.invalid_status_for_approval')], 422);
         }
 
+        $application->update([
+            'approval_officer_id' => $request->user()->id,
+            'approval_started_at' => $application->approval_started_at ?? now(),
+            'approval_completed_at' => now(),
+        ]);
+
+        // Explicit audit log for approval action
+        $application->logAccess('approved_by_officer', [
+            'officer_id' => $request->user()->id,
+            'officer_name' => $request->user()->full_name,
+            'notes' => $validated['notes'] ?? 'Approved',
+        ]);
+
         $this->applicationService->changeStatus($application, 'approved', $validated['notes'] ?? 'Approved');
 
-        // FIX-17/ARCH-03: Queue PDF generation instead of synchronous
-        \App\Jobs\GenerateEVisaPdf::dispatch($application);
-
-        // Notification is already dispatched by changeStatus()
+        // Handle ETA vs eVisa approval differently
+        if ($application->authorization_type === 'eta') {
+            // ETA: Generate ETA number and QR code
+            $etaService = app(\App\Services\EtaService::class);
+            $etaService->processEtaApproval($application);
+            
+            // Queue ETA notification email
+            \App\Jobs\SendNotification::dispatch($application, 'eta_approved');
+        } else {
+            // eVisa: Queue PDF generation
+            \App\Jobs\GenerateEVisaPdf::dispatch($application);
+        }
 
         return response()->json([
             'message'     => __('case.approved'),
@@ -392,6 +416,19 @@ class CaseController extends Controller
         if ($application->status !== 'pending_approval') {
             return response()->json(['message' => 'Application must be in pending_approval status to deny'], 422);
         }
+
+        $application->update([
+            'approval_officer_id' => $request->user()->id,
+            'approval_started_at' => $application->approval_started_at ?? now(),
+            'approval_completed_at' => now(),
+        ]);
+
+        // Explicit audit log for denial action
+        $application->logAccess('denied_by_officer', [
+            'officer_id' => $request->user()->id,
+            'officer_name' => $request->user()->full_name,
+            'notes' => $validated['notes'],
+        ]);
 
         $this->applicationService->changeStatus($application, 'denied', $validated['notes']);
 

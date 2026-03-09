@@ -42,8 +42,8 @@ class ReportController extends Controller
             'sla'   => $this->slaService->getStats(),
             'users' => [
                 'total_applicants'  => User::where('role', 'applicant')->count(),
-                'total_officers'    => User::whereIn('role', ['gis_officer', 'mfa_reviewer'])->count(),
-                'active_officers'   => User::whereIn('role', ['gis_officer', 'mfa_reviewer'])->where('is_active', true)->count(),
+                'total_officers'    => User::whereIn('role', ['gis_officer', 'gis_reviewer', 'gis_approver', 'gis_admin', 'mfa_reviewer', 'mfa_approver', 'mfa_admin', 'admin'])->count(),
+                'active_officers'   => User::whereIn('role', ['gis_officer', 'gis_reviewer', 'gis_approver', 'gis_admin', 'mfa_reviewer', 'mfa_approver', 'mfa_admin', 'admin'])->where('is_active', true)->count(),
             ],
         ]);
     }
@@ -77,6 +77,8 @@ class ReportController extends Controller
             'internalNotes.user:id,first_name,last_name',
             'user:id,first_name,last_name,email',
             'assignedOfficer:id,first_name,last_name',
+            'reviewingOfficer:id,first_name,last_name,email',
+            'approvalOfficer:id,first_name,last_name,email',
             'riskAssessment',
         ]);
 
