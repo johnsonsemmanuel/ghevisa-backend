@@ -27,7 +27,12 @@ class AdminAiAssistantService
     public function processQuery(string $query): array
     {
         // First, analyze the query to determine what data to fetch
-        $dataContext = $this->gatherDataContext($query);
+        try {
+            $dataContext = $this->gatherDataContext($query);
+        } catch (\Exception $e) {
+            Log::error('AI Assistant data gathering error', ['error' => $e->getMessage(), 'query' => $query]);
+            $dataContext = ['period' => ['description' => 'Last 30 days (default)']];
+        }
         
         // If we couldn't connect to OpenAI, use rule-based responses
         if (empty($this->openAiApiKey)) {
@@ -92,8 +97,9 @@ class AdminAiAssistantService
             $context['applications'] = [
                 'total' => Application::whereBetween('created_at', [$startDate, $endDate])->count(),
                 'by_status' => Application::whereBetween('created_at', [$startDate, $endDate])
+                    ->selectRaw('status, count(*) as total')
                     ->groupBy('status')
-                    ->pluck('count', 'status')
+                    ->pluck('total', 'status')
                     ->toArray(),
                 'pending' => Application::whereIn('status', ['submitted', 'under_review', 'pending_approval'])->count(),
             ];

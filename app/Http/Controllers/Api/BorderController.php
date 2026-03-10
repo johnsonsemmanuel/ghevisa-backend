@@ -280,6 +280,18 @@ class BorderController extends Controller
             'crossed_at' => now(),
         ]);
 
+        // Mark ETA as used when a valid ETA is used for entry
+        if (
+            $validated['crossing_type'] === 'entry' &&
+            $validated['document_type'] === 'eta' &&
+            ($validated['verification_status'] === 'valid') &&
+            !empty($validated['eta_application_id'])
+        ) {
+            \App\Models\EtaApplication::where('id', $validated['eta_application_id'])
+                ->where('status', 'approved')
+                ->update(['status' => 'used']);
+        }
+
         $auditChecksum = hash('sha256', implode('|', [
             $crossing->id,
             $crossing->crossing_type,

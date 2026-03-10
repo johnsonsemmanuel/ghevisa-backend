@@ -53,8 +53,8 @@ class ApplicationRoutingService
 
         // Initialize risk screening status and queue
         $application->risk_screening_status = 'pending';
-        $application->current_queue = 'review';
-        $application->status = 'under_review';
+        $application->current_queue = Application::QUEUE_REVIEW;
+        $application->status = Application::STATUS_UNDER_REVIEW;
         $application->save();
 
         // Perform risk assessment immediately
@@ -158,11 +158,11 @@ class ApplicationRoutingService
         $oldAgency = $application->assigned_agency;
 
         $application->assigned_agency = 'mfa';
-        $application->status = 'escalated';
+        $application->status = Application::STATUS_ESCALATED;
         $application->assigned_officer_id = null;
         $application->reviewing_officer_id = null;
         $application->approval_officer_id = null;
-        $application->current_queue = 'review';
+        $application->current_queue = Application::QUEUE_REVIEW;
 
         // Assign to appropriate mission
         $application->owner_mission_id = $this->determineMission($application);
@@ -180,12 +180,12 @@ class ApplicationRoutingService
     public function returnToGis(Application $application): Application
     {
         $application->assigned_agency = 'gis';
-        $application->status = 'under_review';
+        $application->status = Application::STATUS_UNDER_REVIEW;
         $application->assigned_officer_id = null;
         $application->reviewing_officer_id = null;
         $application->approval_officer_id = null;
         $application->owner_mission_id = null;
-        $application->current_queue = 'review';
+        $application->current_queue = Application::QUEUE_REVIEW;
         $application->save();
 
         return $application;
@@ -208,8 +208,8 @@ class ApplicationRoutingService
      */
     public function forwardToApproval(Application $application): Application
     {
-        $application->current_queue = 'approval';
-        $application->status = 'pending_approval';
+        $application->current_queue = Application::QUEUE_APPROVAL;
+        $application->status = Application::STATUS_PENDING_APPROVAL;
         $application->review_completed_at = now();
         $application->save();
 
@@ -233,8 +233,8 @@ class ApplicationRoutingService
      */
     public function approve(Application $application): Application
     {
-        $application->status = 'approved';
-        $application->current_queue = 'completed';
+        $application->status = Application::STATUS_APPROVED;
+        $application->current_queue = Application::QUEUE_COMPLETED;
         $application->approval_completed_at = now();
         $application->decided_at = now();
         $application->save();
@@ -247,8 +247,8 @@ class ApplicationRoutingService
      */
     public function deny(Application $application): Application
     {
-        $application->status = 'denied';
-        $application->current_queue = 'completed';
+        $application->status = Application::STATUS_DENIED;
+        $application->current_queue = Application::QUEUE_COMPLETED;
         $application->approval_completed_at = now();
         $application->decided_at = now();
         $application->save();
@@ -261,8 +261,8 @@ class ApplicationRoutingService
      */
     public function returnToReview(Application $application): Application
     {
-        $application->current_queue = 'review';
-        $application->status = 'under_review';
+        $application->current_queue = Application::QUEUE_REVIEW;
+        $application->status = Application::STATUS_UNDER_REVIEW;
         $application->approval_officer_id = null;
         $application->approval_started_at = null;
         $application->save();

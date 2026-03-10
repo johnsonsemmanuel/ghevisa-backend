@@ -22,6 +22,7 @@ class EtaApplication extends Model
         'passport_number_encrypted',
         'passport_issue_date',
         'passport_expiry_date',
+        'passport_issuing_authority',
         'passport_scan_path',
         'photo_path',
         'email_encrypted',
@@ -49,6 +50,9 @@ class EtaApplication extends Model
         'payment_reference',
         'approved_at',
         'expires_at',
+        'passport_verification_status',
+        'passport_verification_source',
+        'passport_verification_at',
     ];
 
     protected function casts(): array

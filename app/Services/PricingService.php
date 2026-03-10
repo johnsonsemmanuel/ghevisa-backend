@@ -4,19 +4,19 @@ namespace App\Services;
 
 use App\Models\Application;
 use App\Models\VisaType;
-use App\Models\ServiceTier;
 
 /**
  * Unified Pricing Service
  * 
  * Implements the official pricing specification:
- * - Base Price: $260 (uniform for all visa types)
- * - Entry Multipliers: Single = 1.0, Multiple = 1.8
+ * - Base Price: $260 (uniform)
+ * - Entry Multipliers:
+ *   - Single = 1.0
+ *   - Multiple = 1.8
  * - Processing Tier Multipliers (E-Visa only):
  *   - Standard = 1.0
- *   - Fast-Track = 1.2
- *   - Express = 1.5
- *   - Ultra-Express = 2.0
+ *   - Priority = 1.3
+ *   - Express  = 1.7
  * 
  * Formulas:
  * - E-Visa: Base Price × Entry Multiplier × Processing Tier Multiplier
@@ -39,9 +39,9 @@ class PricingService
      * Processing tier multipliers (E-Visa only)
      */
     const TIER_MULTIPLIERS = [
-        'standard'      => 1.0,
-        'fast_track'    => 1.3,
-        'express'       => 1.5,
+        'standard' => 1.0,
+        'priority' => 1.3,
+        'express'  => 1.7,
     ];
 
     /**
@@ -74,24 +74,16 @@ class PricingService
         // Step 2: Entry Type Multiplier
         $entryMultiplier = $this->getEntryMultiplier($entryType);
 
-        // Step 3: Get Service Tier from database
-        $serviceTier = ServiceTier::where('code', $serviceTierCode)->first();
-        
-        // Step 4: Processing Tier Multiplier and Additional Fee (E-Visa only)
-        $tierMultiplier = 1.0;
-        $additionalFee = 0;
-        
-        if ($visaChannel === 'e-visa' && $serviceTier) {
-            $tierMultiplier = $serviceTier->fee_multiplier;
-            $additionalFee = $serviceTier->additional_fee;
-        }
+        // Step 3: Processing Tier Multiplier (E-Visa only)
+        $tierMultiplier = $this->getTierMultiplier($visaChannel, $serviceTierCode);
+        $additionalFee = 0.0;
 
-        // Calculate total
-        $total = ($basePrice * $entryMultiplier * $tierMultiplier) + $additionalFee;
+        // Calculate total (spec formula)
+        $total = $basePrice * $entryMultiplier * $tierMultiplier;
 
         // Calculate breakdown
         $entryFee = $basePrice * $entryMultiplier;
-        $processingFee = ($entryFee * $tierMultiplier) - $entryFee + $additionalFee;
+        $processingFee = $total - $entryFee;
 
         return [
             'base_price' => round($basePrice, 2),
@@ -122,18 +114,17 @@ class PricingService
 
     /**
      * Get processing tier multiplier.
-     * Uses database values for E-Visa channel.
+     * Pure function based on specification, independent of DB.
      */
     protected function getTierMultiplier(string $visaChannel, string $serviceTierCode): float
     {
-        // Regular visa: no tier multiplier
+        // Regular / on-arrival visa: no tier multiplier
         if ($visaChannel === 'regular' || $visaChannel === 'on-arrival') {
             return 1.0;
         }
 
-        // E-Visa: use database fee multiplier
-        $serviceTier = ServiceTier::where('code', $serviceTierCode)->first();
-        return $serviceTier ? $serviceTier->fee_multiplier : 1.0;
+        // E-Visa: use hard-coded spec multipliers
+        return self::TIER_MULTIPLIERS[$serviceTierCode] ?? 1.0;
     }
 
     /**
@@ -204,19 +195,19 @@ class PricingService
                 'code' => 'standard',
                 'name' => 'Standard Processing',
                 'multiplier' => self::TIER_MULTIPLIERS['standard'],
-                'description' => '3-5 business days',
+                'description' => '3–5 business days',
             ],
             [
-                'code' => 'fast_track',
-                'name' => 'Fast-Track Processing',
-                'multiplier' => self::TIER_MULTIPLIERS['fast_track'],
-                'description' => '1-3 business days',
+                'code' => 'priority',
+                'name' => 'Priority Processing',
+                'multiplier' => self::TIER_MULTIPLIERS['priority'],
+                'description' => 'within 48 hours',
             ],
             [
                 'code' => 'express',
                 'name' => 'Express Processing',
                 'multiplier' => self::TIER_MULTIPLIERS['express'],
-                'description' => '24-48 hours',
+                'description' => 'within 5 hours',
             ],
         ];
     }
@@ -226,37 +217,57 @@ class PricingService
      */
     public function getExamplePrices(): array
     {
-        return [
-            [
-                'description' => 'E-Visa, Single Entry, Standard',
-                'calculation' => '260 × 1.0 × 1.0',
-                'price' => 260.00,
-            ],
-            [
-                'description' => 'E-Visa, Multiple Entry, Standard',
-                'calculation' => '260 × 1.8 × 1.0',
-                'price' => 468.00,
-            ],
-            [
-                'description' => 'E-Visa, Single Entry, Express',
-                'calculation' => '260 × 1.0 × 1.5',
-                'price' => 390.00,
-            ],
-            [
-                'description' => 'E-Visa, Multiple Entry, Express',
-                'calculation' => '260 × 1.8 × 1.5',
-                'price' => 702.00,
-            ],
-            [
-                'description' => 'Regular Visa, Single Entry',
-                'calculation' => '260 × 1.0',
-                'price' => 260.00,
-            ],
-            [
-                'description' => 'Regular Visa, Multiple Entry',
-                'calculation' => '260 × 1.8',
-                'price' => 468.00,
-            ],
+        $examples = [];
+
+        // Helper to compute from spec formula
+        $calc = function (string $visaChannel, string $entryType, string $tier) {
+            $base = self::BASE_PRICE;
+            $entryMult = $this->getEntryMultiplier($entryType);
+            $tierMult = $this->getTierMultiplier($visaChannel, $tier);
+            return [
+                'calculation' => "{$base} × {$entryMult} × {$tierMult}",
+                'price' => round($base * $entryMult * $tierMult, 2),
+            ];
+        };
+
+        // E-Visa examples
+        $examples[] = array_merge([
+            'description' => 'E-Visa, Single Entry, Standard',
+        ], $calc('e-visa', 'single', 'standard'));
+
+        $examples[] = array_merge([
+            'description' => 'E-Visa, Single Entry, Priority',
+        ], $calc('e-visa', 'single', 'priority'));
+
+        $examples[] = array_merge([
+            'description' => 'E-Visa, Single Entry, Express',
+        ], $calc('e-visa', 'single', 'express'));
+
+        $examples[] = array_merge([
+            'description' => 'E-Visa, Multiple Entry, Standard',
+        ], $calc('e-visa', 'multiple', 'standard'));
+
+        $examples[] = array_merge([
+            'description' => 'E-Visa, Multiple Entry, Priority',
+        ], $calc('e-visa', 'multiple', 'priority'));
+
+        $examples[] = array_merge([
+            'description' => 'E-Visa, Multiple Entry, Express',
+        ], $calc('e-visa', 'multiple', 'express'));
+
+        // Regular visa examples (no tier multiplier)
+        $examples[] = [
+            'description' => 'Regular Visa, Single Entry',
+            'calculation' => '260 × 1.0',
+            'price' => round(self::BASE_PRICE * self::ENTRY_MULTIPLIER_SINGLE, 2),
         ];
+
+        $examples[] = [
+            'description' => 'Regular Visa, Multiple Entry',
+            'calculation' => '260 × 1.8',
+            'price' => round(self::BASE_PRICE * self::ENTRY_MULTIPLIER_MULTIPLE, 2),
+        ];
+
+        return $examples;
     }
 }

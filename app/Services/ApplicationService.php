@@ -14,6 +14,7 @@ class ApplicationService
 {
     public function __construct(
         protected ApplicationRoutingService $routingService,
+        protected RiskScoringTriggerService $riskScoringTriggerService,
     ) {}
 
     /**
@@ -326,6 +327,11 @@ class ApplicationService
 
             $application->save();
             $this->recordStatusChange($application, $fromStatus, $newStatus, $notes);
+
+            // Trigger risk scoring when application moves to under_review
+            if ($newStatus === 'under_review') {
+                $this->riskScoringTriggerService->onStatusChangeToInReview($application);
+            }
 
             // Send appropriate notifications based on status change
             if ($newStatus === 'approved') {

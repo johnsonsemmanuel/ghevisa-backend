@@ -90,6 +90,12 @@ return [
         'callback_secret' => env('ETA_CALLBACK_SECRET', ''),
     ],
 
+    'qr' => [
+        // Dedicated secrets for QR verification to decouple from APP_KEY
+        'evisa_secret' => env('EVISA_QR_SECRET', env('APP_KEY')),
+        'eta_secret' => env('ETA_QR_SECRET', env('APP_KEY')),
+    ],
+
     // HIGH-05: Configurable exchange rates (replace with live API in production)
     'exchange_rates' => [
         'USD' => (float) env('EXCHANGE_RATE_USD', 1),

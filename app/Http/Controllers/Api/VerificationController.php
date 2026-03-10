@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Application;
+use App\Models\EtaApplication;
+use App\Models\CountryVisaEligibility;
+use App\Models\TravelVerificationLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,6 +18,85 @@ use Illuminate\Http\Request;
  */
 class VerificationController extends Controller
 {
+    /**
+     * Generic travel authorization verification endpoint.
+     * Used primarily by airline systems and lightweight portals.
+     *
+     * Input: passport_number, nationality, optional eta_number / visa_reference.
+     * Output: high-level authorization status and minimal details.
+     */
+    public function verifyTravel(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'passport_number' => 'required|string',
+            'nationality' => 'required|string|max:3',
+            'eta_number' => 'nullable|string',
+            'visa_reference' => 'nullable|string',
+        ]);
+
+        $passport = strtoupper(trim($validated['passport_number']));
+        $nationality = strtoupper(trim($validated['nationality']));
+
+        // 1) Check for valid visa
+        $visa = $this->findValidVisa($passport, $nationality, $validated['visa_reference'] ?? null);
+        if ($visa) {
+            $response = [
+                'status' => 'AUTHORIZED',
+                'authorization_type' => 'VISA',
+                'visa_reference' => $visa->reference_number,
+                'valid_until' => $this->calculateVisaValidity($visa),
+                'passport_number' => $this->maskPassport($passport),
+            ];
+            $this->logVerification($request, $passport, $nationality, $response);
+            return response()->json($response);
+        }
+
+        // 2) Check for valid ETA
+        $eta = $this->findValidEta($passport, $nationality, $validated['eta_number'] ?? null);
+        if ($eta) {
+            $response = [
+                'status' => 'AUTHORIZED',
+                'authorization_type' => 'ETA',
+                'eta_number' => $eta->eta_number,
+                'valid_until' => $eta->expires_at?->format('Y-m-d'),
+                'passport_number' => $this->maskPassport($passport),
+            ];
+            $this->logVerification($request, $passport, $nationality, $response);
+            return response()->json($response);
+        }
+
+        // 3) No active document: determine required authorization from eligibility table
+        $eligibility = CountryVisaEligibility::getByCountryCode($nationality);
+        $authType = $eligibility?->authorization_type ?? 'evisa';
+
+        if ($authType === 'eta') {
+            $response = [
+                'status' => 'ETA_REQUIRED',
+                'authorization_type' => 'ETA',
+                'message' => 'Electronic Travel Authorization required',
+            ];
+            $this->logVerification($request, $passport, $nationality, $response);
+            return response()->json($response, 404);
+        }
+
+        if ($authType === 'evisa') {
+            $response = [
+                'status' => 'VISA_REQUIRED',
+                'authorization_type' => 'VISA',
+                'message' => 'Visa required before travel',
+            ];
+            $this->logVerification($request, $passport, $nationality, $response);
+            return response()->json($response, 404);
+        }
+
+        $response = [
+            'status' => 'DENIED',
+            'authorization_type' => 'NONE',
+            'message' => 'No valid travel authorization found',
+        ];
+        $this->logVerification($request, $passport, $nationality, $response);
+        return response()->json($response, 404);
+    }
     /**
      * Validate an eVisa by QR code or reference number.
      * 
@@ -141,6 +223,99 @@ class VerificationController extends Controller
         $expectedChecksum = hash_hmac('sha256', $data, config('app.key'));
 
         return strtoupper($providedChecksum) === strtoupper($expectedChecksum);
+    }
+
+    /**
+     * Find an approved, non-expired visa matching passport + nationality.
+     */
+    protected function findValidVisa(string $passport, string $nationality, ?string $reference = null): ?Application
+    {
+        $query = Application::whereIn('status', ['approved', 'issued']);
+
+        if ($reference) {
+            $query->where('reference_number', $reference);
+        }
+
+        $applications = $query->get();
+
+        foreach ($applications as $app) {
+            if (strtoupper($app->passport_number) !== $passport) {
+                continue;
+            }
+            if ($app->nationality && strtoupper($app->nationality) !== $nationality) {
+                continue;
+            }
+            $validUntil = $this->calculateVisaValidity($app);
+            if ($validUntil && $validUntil < now()->format('Y-m-d')) {
+                continue;
+            }
+            return $app;
+        }
+
+        return null;
+    }
+
+    /**
+     * Find an approved, non-expired ETA matching passport + nationality.
+     */
+    protected function findValidEta(string $passport, string $nationality, ?string $etaNumber = null): ?EtaApplication
+    {
+        $query = EtaApplication::where('status', 'approved');
+
+        if ($etaNumber) {
+            $query->where('eta_number', $etaNumber);
+        }
+
+        $etas = $query->get();
+
+        foreach ($etas as $eta) {
+            $storedPassport = \Illuminate\Support\Facades\Crypt::decryptString($eta->passport_number_encrypted);
+            if (strtoupper($storedPassport) !== $passport) {
+                continue;
+            }
+            $storedNationality = \Illuminate\Support\Facades\Crypt::decryptString($eta->nationality_encrypted);
+            if (strtoupper($storedNationality) !== $nationality) {
+                continue;
+            }
+            if ($eta->expires_at && $eta->expires_at < now()) {
+                continue;
+            }
+            return $eta;
+        }
+
+        return null;
+    }
+
+    protected function calculateVisaValidity(Application $application): ?string
+    {
+        $visaType = $application->visaType;
+        $expiry = $application->decided_at
+            ? $application->decided_at->copy()->addDays($visaType?->max_duration_days ?? 90)
+            : null;
+
+        return $expiry?->format('Y-m-d');
+    }
+
+    protected function maskPassport(string $passport): string
+    {
+        return substr($passport, 0, 3) . '****';
+    }
+
+    protected function logVerification(Request $request, string $passport, string $nationality, array $response): void
+    {
+        TravelVerificationLog::create([
+            'passport_suffix' => substr($passport, -4),
+            'nationality' => $nationality,
+            'user_type' => $request->user()?->role ?? 'api',
+            'ip_address' => $request->ip(),
+            'status' => $response['status'] ?? 'UNKNOWN',
+            'authorization_type' => $response['authorization_type'] ?? null,
+            'eta_number' => $response['eta_number'] ?? null,
+            'visa_reference' => $response['visa_reference'] ?? null,
+            'meta' => [
+                'user_id' => $request->user()?->id,
+            ],
+        ]);
     }
 
 

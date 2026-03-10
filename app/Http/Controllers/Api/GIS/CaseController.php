@@ -30,6 +30,7 @@ class CaseController extends Controller
                 'assignedOfficer:id,first_name,last_name',
                 'reviewingOfficer:id,first_name,last_name',
                 'approvalOfficer:id,first_name,last_name',
+                'riskAssessment',
             ]);
 
         if ($status = $request->query('status')) {
@@ -56,7 +57,28 @@ class CaseController extends Controller
                 WHEN status = 'submitted' THEN 4
                 ELSE 5
             END
-        ")->orderBy('created_at', 'desc')
+        ")
+        ->orderByRaw("
+            CASE 
+                WHEN sla_deadline IS NULL THEN 999999999
+                ELSE julianday(sla_deadline) - julianday('now')
+            END ASC
+        ")
+        ->orderByRaw("
+            CASE 
+                WHEN EXISTS (
+                    SELECT 1 FROM risk_assessments ra 
+                    WHERE ra.application_id = applications.id 
+                    AND ra.risk_score IS NOT NULL
+                ) THEN (
+                    SELECT ra.risk_score FROM risk_assessments ra 
+                    WHERE ra.application_id = applications.id 
+                    ORDER BY ra.created_at DESC LIMIT 1
+                )
+                ELSE 0
+            END DESC
+        ")
+        ->orderBy('created_at', 'desc')
           ->paginate(20);
 
         return response()->json($applications);
@@ -405,6 +427,8 @@ class CaseController extends Controller
         }
 
         $validated = $request->validate([
+            'reason_codes' => 'required|array|min:1',
+            'reason_codes.*' => 'required|string|exists:reason_codes,code',
             'notes' => 'required|string|max:2000',
         ]);
 
@@ -427,6 +451,7 @@ class CaseController extends Controller
         $application->logAccess('denied_by_officer', [
             'officer_id' => $request->user()->id,
             'officer_name' => $request->user()->full_name,
+            'reason_codes' => $validated['reason_codes'],
             'notes' => $validated['notes'],
         ]);
 
@@ -661,7 +686,8 @@ class CaseController extends Controller
         $validated = $request->validate([
             'application_ids' => 'required|array|min:1|max:50',
             'application_ids.*' => 'integer|exists:applications,id',
-            'reason_code' => 'required|string|exists:reason_codes,code',
+            'reason_codes' => 'required|array|min:1',
+            'reason_codes.*' => 'required|string|exists:reason_codes,code',
             'notes' => 'required|string|max:2000',
         ]);
 

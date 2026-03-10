@@ -76,7 +76,7 @@ class EscalationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = $this->mfaBaseQuery($request)
-            ->with(['visaType', 'assignedOfficer:id,first_name,last_name']);
+            ->with(['visaType', 'assignedOfficer:id,first_name,last_name', 'riskAssessment']);
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);
@@ -92,12 +92,33 @@ class EscalationController extends Controller
 
         $applications = $query->orderByRaw("
             CASE
-                WHEN status = 'pending_approval' THEN 1
-                WHEN status = 'escalated' THEN 2
-                WHEN status = 'under_review' THEN 3
+                WHEN status = '" . \App\Models\Application::STATUS_PENDING_APPROVAL . "' THEN 1
+                WHEN status = '" . \App\Models\Application::STATUS_ESCALATED . "' THEN 2
+                WHEN status = '" . \App\Models\Application::STATUS_UNDER_REVIEW . "' THEN 3
                 ELSE 4
             END
-        ")->orderBy('created_at', 'desc')
+        ")
+        ->orderByRaw("
+            CASE 
+                WHEN sla_deadline IS NULL THEN 999999999
+                ELSE julianday(sla_deadline) - julianday('now')
+            END ASC
+        ")
+        ->orderByRaw("
+            CASE 
+                WHEN EXISTS (
+                    SELECT 1 FROM risk_assessments ra 
+                    WHERE ra.application_id = applications.id 
+                    AND ra.risk_score IS NOT NULL
+                ) THEN (
+                    SELECT ra.risk_score FROM risk_assessments ra 
+                    WHERE ra.application_id = applications.id 
+                    ORDER BY ra.created_at DESC LIMIT 1
+                )
+                ELSE 0
+            END DESC
+        ")
+        ->orderBy('created_at', 'desc')
             ->paginate(20);
 
         return response()->json($applications);
@@ -150,7 +171,7 @@ class EscalationController extends Controller
 
         if ($denied = $this->ensureMissionAccess($request, $application)) return $denied;
 
-        if (!in_array($application->status, ['escalated', 'under_review'])) {
+        if (!in_array($application->status, [\App\Models\Application::STATUS_ESCALATED, \App\Models\Application::STATUS_UNDER_REVIEW])) {
             return response()->json(['message' => __('case.invalid_status_for_approval')], 422);
         }
 
@@ -158,12 +179,12 @@ class EscalationController extends Controller
             'reviewed_by_id' => $request->user()->id,
             'reviewed_at' => now(),
             'reviewing_officer_id' => $request->user()->id,
-            'current_queue' => 'approval_queue',
+            'current_queue' => \App\Models\Application::QUEUE_APPROVAL,
         ]);
 
         $this->applicationService->changeStatus(
             $application, 
-            'pending_approval', 
+            \App\Models\Application::STATUS_PENDING_APPROVAL, 
             $validated['notes'] ?? 'Submitted for approval by MFA reviewer'
         );
 
@@ -190,7 +211,7 @@ class EscalationController extends Controller
         if ($denied = $this->ensureMissionAccess($request, $application)) return $denied;
 
         // Only pending_approval applications can be approved (two-step enforcement)
-        if ($application->status !== 'pending_approval') {
+        if ($application->status !== \App\Models\Application::STATUS_PENDING_APPROVAL) {
             return response()->json(['message' => __('case.invalid_status_for_approval')], 422);
         }
 
@@ -200,7 +221,7 @@ class EscalationController extends Controller
             'approval_completed_at' => now(),
         ]);
 
-        $this->applicationService->changeStatus($application, 'approved', $validated['notes'] ?? 'Approved by MFA');
+        $this->applicationService->changeStatus($application, \App\Models\Application::STATUS_APPROVED, $validated['notes'] ?? 'Approved by MFA');
 
         // FIX-17/ARCH-03: Queue PDF generation instead of synchronous
         \App\Jobs\GenerateEVisaPdf::dispatch($application);
@@ -224,13 +245,15 @@ class EscalationController extends Controller
         }
 
         $validated = $request->validate([
+            'reason_codes' => 'required|array|min:1',
+            'reason_codes.*' => 'required|string|exists:reason_codes,code',
             'notes' => 'required|string|max:2000',
         ]);
 
         if ($denied = $this->ensureMissionAccess($request, $application)) return $denied;
 
         // Only pending_approval applications can be denied (two-step enforcement)
-        if ($application->status !== 'pending_approval') {
+        if ($application->status !== \App\Models\Application::STATUS_PENDING_APPROVAL) {
             return response()->json(['message' => 'Application must be in pending_approval status to deny'], 422);
         }
 
@@ -240,7 +263,15 @@ class EscalationController extends Controller
             'approval_completed_at' => now(),
         ]);
 
-        $this->applicationService->changeStatus($application, 'denied', $validated['notes']);
+        // Explicit audit log for denial action
+        $application->logAccess('denied_by_officer', [
+            'officer_id' => $request->user()->id,
+            'officer_name' => $request->user()->full_name,
+            'reason_codes' => $validated['reason_codes'],
+            'notes' => $validated['notes'],
+        ]);
+
+        $this->applicationService->changeStatus($application, \App\Models\Application::STATUS_DENIED, $validated['notes']);
 
         return response()->json([
             'message'     => __('case.denied'),
@@ -261,7 +292,7 @@ class EscalationController extends Controller
 
         if ($denied = $this->ensureMissionAccess($request, $application)) return $denied;
 
-        if ($application->status !== 'approved') {
+        if ($application->status !== \App\Models\Application::STATUS_APPROVED) {
             return response()->json(['message' => 'Application must be approved before issuing visa'], 422);
         }
 
@@ -270,7 +301,7 @@ class EscalationController extends Controller
             \App\Jobs\GenerateEVisaPdf::dispatch($application);
         }
 
-        $this->applicationService->changeStatus($application, 'issued', 'Visa issued');
+        $this->applicationService->changeStatus($application, \App\Models\Application::STATUS_ISSUED, 'Visa issued');
 
         return response()->json([
             'message'     => 'Visa issued successfully',
@@ -328,28 +359,28 @@ class EscalationController extends Controller
 
         return response()->json([
             'total_escalated'   => (clone $base)->count(),
-            'pending_decision'  => (clone $base)->whereIn('status', ['escalated', 'under_review'])->count(),
-            'pending_approval'  => (clone $base)->where('status', 'pending_approval')->count(),
-            'approved_today'    => (clone $base)->whereIn('status', ['approved', 'issued'])->whereDate('decided_at', today())->count(),
-            'denied_today'      => (clone $base)->where('status', 'denied')->whereDate('decided_at', today())->count(),
-            'issued_today'      => (clone $base)->where('status', 'issued')->whereDate('updated_at', today())->count(),
-            'total_approved'    => (clone $base)->whereIn('status', ['approved', 'issued'])->count(),
-            'total_denied'      => (clone $base)->where('status', 'denied')->count(),
+            'pending_decision'  => (clone $base)->whereIn('status', [\App\Models\Application::STATUS_ESCALATED, \App\Models\Application::STATUS_UNDER_REVIEW])->count(),
+            'pending_approval'  => (clone $base)->where('status', \App\Models\Application::STATUS_PENDING_APPROVAL)->count(),
+            'approved_today'    => (clone $base)->whereIn('status', [\App\Models\Application::STATUS_APPROVED, \App\Models\Application::STATUS_ISSUED])->whereDate('decided_at', today())->count(),
+            'denied_today'      => (clone $base)->where('status', \App\Models\Application::STATUS_DENIED)->whereDate('decided_at', today())->count(),
+            'issued_today'      => (clone $base)->where('status', \App\Models\Application::STATUS_ISSUED)->whereDate('updated_at', today())->count(),
+            'total_approved'    => (clone $base)->whereIn('status', [\App\Models\Application::STATUS_APPROVED, \App\Models\Application::STATUS_ISSUED])->count(),
+            'total_denied'      => (clone $base)->where('status', \App\Models\Application::STATUS_DENIED)->count(),
             'sla_breaches'      => (clone $base)->whereNotNull('sla_deadline')
-                ->whereNotIn('status', ['approved', 'denied', 'issued', 'cancelled'])
+                ->whereNotIn('status', [\App\Models\Application::STATUS_APPROVED, \App\Models\Application::STATUS_DENIED, \App\Models\Application::STATUS_ISSUED, \App\Models\Application::STATUS_CANCELLED])
                 ->where('sla_deadline', '<', now())->count(),
             'review_queue'      => (clone $base)->where(function ($q) {
-                $q->where('current_queue', 'review_queue')
+                $q->where('current_queue', \App\Models\Application::QUEUE_REVIEW)
                   ->orWhere(function ($q2) {
                       $q2->whereNull('current_queue')
-                         ->whereIn('status', ['escalated', 'under_review']);
+                         ->whereIn('status', [\App\Models\Application::STATUS_ESCALATED, \App\Models\Application::STATUS_UNDER_REVIEW]);
                   });
             })->count(),
             'approval_queue'    => (clone $base)->where(function ($q) {
-                $q->where('current_queue', 'approval_queue')
+                $q->where('current_queue', \App\Models\Application::QUEUE_APPROVAL)
                   ->orWhere(function ($q2) {
                       $q2->whereNull('current_queue')
-                         ->where('status', 'pending_approval');
+                         ->where('status', \App\Models\Application::STATUS_PENDING_APPROVAL);
                   });
             })->count(),
         ]);
@@ -417,7 +448,7 @@ class EscalationController extends Controller
     {
         if ($denied = $this->ensureMissionAccess($request, $application)) return $denied;
 
-        if (!in_array($application->status, ['escalated', 'under_review', 'pending_approval'])) {
+        if (!in_array($application->status, [\App\Models\Application::STATUS_ESCALATED, \App\Models\Application::STATUS_UNDER_REVIEW, \App\Models\Application::STATUS_PENDING_APPROVAL])) {
             return response()->json(['message' => 'Cannot request info for applications in this status'], 422);
         }
 
@@ -437,7 +468,7 @@ class EscalationController extends Controller
 
         $this->applicationService->changeStatus(
             $application,
-            'additional_info_requested',
+            \App\Models\Application::STATUS_ADDITIONAL_INFO,
             $notes
         );
 
@@ -506,7 +537,7 @@ class EscalationController extends Controller
     {
         if ($denied = $this->ensureMissionAccess($request, $application)) return $denied;
 
-        if (!in_array($application->status, ['approved', 'denied', 'pending_approval'])) {
+        if (!in_array($application->status, [\App\Models\Application::STATUS_APPROVED, \App\Models\Application::STATUS_DENIED, \App\Models\Application::STATUS_PENDING_APPROVAL])) {
             return response()->json(['message' => 'Can only revert approved, denied, or pending approval applications'], 422);
         }
 
@@ -518,7 +549,7 @@ class EscalationController extends Controller
         
         $this->applicationService->changeStatus(
             $application,
-            'escalated',
+            \App\Models\Application::STATUS_ESCALATED,
             "Decision reverted from {$previousStatus}: {$validated['reason']}"
         );
 

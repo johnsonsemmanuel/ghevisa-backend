@@ -9,6 +9,7 @@ use App\Services\AnalyticsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Crypt;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AnalyticsController extends Controller
@@ -105,49 +106,84 @@ class AnalyticsController extends Controller
         $startDate = $request->query('start_date', now()->subDays(30)->toDateString());
         $endDate = $request->query('end_date', now()->toDateString());
 
-        // Applications by nationality
-        $applicationsByCountry = Application::whereBetween('created_at', [$startDate, $endDate . ' 23:59:59'])
-            ->select('nationality_encrypted as nationality', DB::raw('COUNT(*) as total'))
-            ->groupBy('nationality_encrypted')
-            ->orderByDesc('total')
-            ->limit(50)
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'country_code' => $item->nationality,
-                    'total' => $item->total,
-                ];
-            });
+        // Fetch all relevant applications
+        $applications = Application::whereBetween('created_at', [$startDate, $endDate . ' 23:59:59'])
+            ->select('nationality_encrypted', 'status')
+            ->get();
 
-        // Visa issued by country
-        $issuedByCountry = Application::where('status', 'issued')
-            ->whereBetween('decided_at', [$startDate, $endDate . ' 23:59:59'])
-            ->select('nationality_encrypted as nationality', DB::raw('COUNT(*) as issued'))
-            ->groupBy('nationality_encrypted')
-            ->orderByDesc('issued')
-            ->limit(50)
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'country_code' => $item->nationality,
-                    'issued' => $item->issued,
-                ];
-            });
+        $stats = [];
+        foreach ($applications as $app) {
+            if (empty($app->nationality_encrypted)) continue;
 
-        // Visa denied by country
-        $deniedByCountry = Application::where('status', 'denied')
-            ->whereBetween('decided_at', [$startDate, $endDate . ' 23:59:59'])
-            ->select('nationality_encrypted as nationality', DB::raw('COUNT(*) as denied'))
-            ->groupBy('nationality_encrypted')
-            ->orderByDesc('denied')
-            ->limit(50)
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'country_code' => $item->nationality,
-                    'denied' => $item->denied,
+            try {
+                $code = strtoupper(Crypt::decryptString($app->nationality_encrypted));
+            } catch (\Exception $e) {
+                // If decryption fails, it might be a raw unencrypted string (e.g. "GH")
+                $code = strtoupper(trim($app->nationality_encrypted));
+            }
+
+            if (empty($code)) continue;
+
+            if (!isset($stats[$code])) {
+                $stats[$code] = [
+                    'country_code' => $code,
+                    'total' => 0,
+                    'issued' => 0,
+                    'approved' => 0,
+                    'denied' => 0,
+                    'pending' => 0
                 ];
-            });
+            }
+
+            $stats[$code]['total']++;
+            
+            if ($app->status === 'issued') {
+                $stats[$code]['issued']++;
+            } elseif ($app->status === 'approved') {
+                $stats[$code]['approved']++;
+            } elseif ($app->status === 'denied') {
+                $stats[$code]['denied']++;
+            } elseif (in_array($app->status, ['submitted', 'under_review', 'pending_approval'])) {
+                $stats[$code]['pending']++;
+            }
+        }
+
+        // Convert stats map to collection to allow easy sorting and manipulation
+        $statsCollection = collect($stats)->values();
+
+        // Applications by nationality (top 50)
+        $applicationsByCountry = $statsCollection->sortByDesc('total')->take(50)->map(function ($item) {
+            return [
+                'country_code' => $item['country_code'],
+                'total' => $item['total'],
+            ];
+        })->values();
+
+        // Visa issued by country (top 50)
+        $issuedByCountry = $statsCollection->sortByDesc('issued')->take(50)->map(function ($item) {
+            return [
+                'country_code' => $item['country_code'],
+                'issued' => $item['issued'],
+            ];
+        })->values();
+
+        // Visa denied by country (top 50)
+        $deniedByCountry = $statsCollection->sortByDesc('denied')->take(50)->map(function ($item) {
+            return [
+                'country_code' => $item['country_code'],
+                'denied' => $item['denied'],
+            ];
+        })->values();
+
+        // Top 10 countries with full breakdown
+        $topCountries = $statsCollection->sortByDesc('total')->take(10)->map(function ($item) {
+            $approvalRate = $item['total'] > 0 
+                ? round((($item['issued'] + $item['approved']) / $item['total']) * 100, 1) 
+                : 0;
+            
+            $item['approval_rate'] = $approvalRate;
+            return $item;
+        })->values();
 
         // Summary stats
         $summary = [
@@ -155,38 +191,8 @@ class AnalyticsController extends Controller
             'total_issued' => Application::where('status', 'issued')->whereBetween('decided_at', [$startDate, $endDate . ' 23:59:59'])->count(),
             'total_denied' => Application::where('status', 'denied')->whereBetween('decided_at', [$startDate, $endDate . ' 23:59:59'])->count(),
             'total_pending' => Application::whereIn('status', ['submitted', 'under_review', 'pending_approval'])->count(),
-            'unique_countries' => Application::whereBetween('created_at', [$startDate, $endDate . ' 23:59:59'])
-                ->distinct('nationality_encrypted')->count('nationality_encrypted'),
+            'unique_countries' => $statsCollection->count(),
         ];
-
-        // Top 10 countries with full breakdown
-        $topCountries = Application::whereBetween('created_at', [$startDate, $endDate . ' 23:59:59'])
-            ->select(
-                'nationality_encrypted as nationality',
-                DB::raw('COUNT(*) as total'),
-                DB::raw('SUM(CASE WHEN status = "issued" THEN 1 ELSE 0 END) as issued'),
-                DB::raw('SUM(CASE WHEN status = "denied" THEN 1 ELSE 0 END) as denied'),
-                DB::raw('SUM(CASE WHEN status = "approved" THEN 1 ELSE 0 END) as approved'),
-                DB::raw('SUM(CASE WHEN status IN ("submitted", "under_review", "pending_approval") THEN 1 ELSE 0 END) as pending')
-            )
-            ->groupBy('nationality_encrypted')
-            ->orderByDesc('total')
-            ->limit(10)
-            ->get()
-            ->map(function ($item) {
-                $approvalRate = $item->total > 0 
-                    ? round((($item->issued + $item->approved) / $item->total) * 100, 1) 
-                    : 0;
-                return [
-                    'country_code' => $item->nationality,
-                    'total' => $item->total,
-                    'issued' => $item->issued,
-                    'approved' => $item->approved,
-                    'denied' => $item->denied,
-                    'pending' => $item->pending,
-                    'approval_rate' => $approvalRate,
-                ];
-            });
 
         return response()->json([
             'period' => ['start' => $startDate, 'end' => $endDate],
@@ -252,18 +258,47 @@ class AnalyticsController extends Controller
         $startDate = $request->query('start_date', now()->subDays(30)->toDateString());
         $endDate = $request->query('end_date', now()->toDateString());
 
-        $data = Application::whereBetween('created_at', [$startDate, $endDate . ' 23:59:59'])
-            ->select(
-                'nationality_encrypted as nationality',
-                DB::raw('COUNT(*) as total'),
-                DB::raw('SUM(CASE WHEN status = "issued" THEN 1 ELSE 0 END) as issued'),
-                DB::raw('SUM(CASE WHEN status = "denied" THEN 1 ELSE 0 END) as denied'),
-                DB::raw('SUM(CASE WHEN status = "approved" THEN 1 ELSE 0 END) as approved'),
-                DB::raw('SUM(CASE WHEN status IN ("submitted", "under_review", "pending_approval") THEN 1 ELSE 0 END) as pending')
-            )
-            ->groupBy('nationality_encrypted')
-            ->orderByDesc('total')
+        $applications = Application::whereBetween('created_at', [$startDate, $endDate . ' 23:59:59'])
+            ->select('nationality_encrypted', 'status')
             ->get();
+
+        $stats = [];
+        foreach ($applications as $app) {
+            if (empty($app->nationality_encrypted)) continue;
+
+            try {
+                $code = strtoupper(Crypt::decryptString($app->nationality_encrypted));
+            } catch (\Exception $e) {
+                $code = strtoupper(trim($app->nationality_encrypted));
+            }
+
+            if (empty($code)) continue;
+
+            if (!isset($stats[$code])) {
+                $stats[$code] = [
+                    'country_code' => $code,
+                    'total' => 0,
+                    'issued' => 0,
+                    'approved' => 0,
+                    'denied' => 0,
+                    'pending' => 0
+                ];
+            }
+
+            $stats[$code]['total']++;
+            
+            if ($app->status === 'issued') {
+                $stats[$code]['issued']++;
+            } elseif ($app->status === 'approved') {
+                $stats[$code]['approved']++;
+            } elseif ($app->status === 'denied') {
+                $stats[$code]['denied']++;
+            } elseif (in_array($app->status, ['submitted', 'under_review', 'pending_approval'])) {
+                $stats[$code]['pending']++;
+            }
+        }
+
+        $data = collect($stats)->sortByDesc('total')->values();
 
         $filename = 'country_analytics_' . now()->format('Y-m-d_His') . '.csv';
 
@@ -273,16 +308,16 @@ class AnalyticsController extends Controller
             fputcsv($handle, ['Country Code', 'Total Applications', 'Issued', 'Approved', 'Denied', 'Pending', 'Approval Rate (%)']);
 
             foreach ($data as $row) {
-                $approvalRate = $row->total > 0 
-                    ? round((($row->issued + $row->approved) / $row->total) * 100, 1) 
+                $approvalRate = $row['total'] > 0 
+                    ? round((($row['issued'] + $row['approved']) / $row['total']) * 100, 1) 
                     : 0;
                 fputcsv($handle, [
-                    $row->nationality,
-                    $row->total,
-                    $row->issued,
-                    $row->approved,
-                    $row->denied,
-                    $row->pending,
+                    $row['country_code'],
+                    $row['total'],
+                    $row['issued'],
+                    $row['approved'],
+                    $row['denied'],
+                    $row['pending'],
                     $approvalRate,
                 ]);
             }

@@ -80,6 +80,25 @@ class EtaController extends Controller
             'hotel_booking' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
         ]);
 
+        // Duplicate ETA prevention: check for existing active ETA
+        $existing = EtaApplication::whereIn('status', ['approved', 'pending'])
+            ->whereNotNull('expires_at')
+            ->get()
+            ->first(function (EtaApplication $eta) use ($validated) {
+                $storedPassport = Crypt::decryptString($eta->passport_number_encrypted);
+                $storedNationality = Crypt::decryptString($eta->nationality_encrypted);
+                return strtoupper($storedPassport) === strtoupper($validated['passport_number'])
+                    && strtoupper($storedNationality) === strtoupper($validated['nationality'])
+                    && !$eta->isExpired();
+            });
+
+        if ($existing) {
+            return response()->json([
+                'message' => 'You already have an active ETA valid until ' . $existing->expires_at?->format('Y-m-d'),
+                'eta' => $this->formatEtaResponse($existing),
+            ], 422);
+        }
+
         // Verify visa type is ETA
         $visaType = VisaType::findOrFail($validated['visa_type_id']);
         if ($visaType->type !== 'eta') {
@@ -125,11 +144,34 @@ class EtaController extends Controller
             'passport_scan_path' => isset($validated['passport_scan']) ? $request->file('passport_scan')->store('eta-documents', 'private') : null,
             'photo_path' => isset($validated['photo']) ? $request->file('photo')->store('eta-photos', 'private') : null,
             'hotel_booking_path' => isset($validated['hotel_booking']) ? $request->file('hotel_booking')->store('eta-documents', 'private') : null,
-            'fee_amount' => $visaType->base_fee,
+            // ETA is free at this stage
+            'fee_amount' => 0,
             'validity_days' => $visaType->max_duration_days,
             'entry_type' => $visaType->entry_type,
             'status' => 'pending',
         ]);
+
+        // Basic screening: passport expiry and declarations
+        $expiry = now()->parse($validated['passport_expiry_date']);
+        $verificationService = app(\App\Services\PassportVerificationService::class);
+        $expiryCheck = $verificationService->validateExpiry($expiry);
+
+        $hasRiskFlags = ($validated['denied_entry_before'] ?? false)
+            || ($validated['criminal_conviction'] ?? false);
+
+        if (!$expiryCheck['valid']) {
+            // Hard block expired passports
+            return response()->json([
+                'message' => __('passport.expired'),
+            ], 422);
+        }
+
+        // Auto-approve low-risk ETAs, flag others for admin attention
+        if (!$hasRiskFlags && ($expiryCheck['code'] === 'ok')) {
+            $this->approveEta($eta);
+        } else {
+            $eta->update(['status' => 'flagged']);
+        }
 
         return response()->json([
             'message' => 'ETA application submitted successfully',

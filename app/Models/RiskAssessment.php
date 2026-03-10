@@ -15,6 +15,7 @@ class RiskAssessment extends Model
         'risk_score',
         'risk_level',
         'factors',
+        'risk_reasons',
         'watchlist_match',
         'watchlist_matches',
         'document_verified',
@@ -27,10 +28,16 @@ class RiskAssessment extends Model
         'status',
         'assessed_by_id',
         'assessed_at',
+        'risk_last_updated',
+        'override_flag',
+        'override_note',
+        'override_by_id',
+        'override_timestamp',
     ];
 
     protected $casts = [
         'factors' => 'array',
+        'risk_reasons' => 'array',
         'watchlist_matches' => 'array',
         'document_checks' => 'array',
         'watchlist_match' => 'boolean',
@@ -39,7 +46,10 @@ class RiskAssessment extends Model
         'travel_history_risk' => 'boolean',
         'previous_denial' => 'boolean',
         'overstay_history' => 'boolean',
+        'override_flag' => 'boolean',
         'assessed_at' => 'datetime',
+        'risk_last_updated' => 'datetime',
+        'override_timestamp' => 'datetime',
     ];
 
     public function application(): BelongsTo
@@ -50,6 +60,11 @@ class RiskAssessment extends Model
     public function assessedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assessed_by_id');
+    }
+
+    public function overrideBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'override_by_id');
     }
 
     public function scopePending($query)

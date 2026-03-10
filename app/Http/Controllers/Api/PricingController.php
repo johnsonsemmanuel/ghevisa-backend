@@ -24,7 +24,7 @@ class PricingController extends Controller
         $validated = $request->validate([
             'visa_channel' => 'required|string|in:e-visa,regular,on-arrival',
             'entry_type' => 'required|string|in:single,multiple',
-            'service_tier_code' => 'required|string|in:standard,fast_track,express',
+            'service_tier_code' => 'required|string|in:standard,priority,express',
         ]);
 
         $pricing = $this->pricingService->getPricingPreview($validated);

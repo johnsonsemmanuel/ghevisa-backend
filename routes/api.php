@@ -7,7 +7,9 @@ use App\Http\Controllers\Api\EligibilityController;
 use App\Http\Controllers\Api\Applicant\ApplicationController;
 use App\Http\Controllers\Api\Applicant\DocumentController;
 use App\Http\Controllers\Api\GIS\CaseController;
+use App\Http\Controllers\Api\GIS\AdminController as GisAdminController;
 use App\Http\Controllers\Api\MFA\EscalationController;
+use App\Http\Controllers\Api\MFA\AdminController as MfaAdminController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Admin\TierConfigController;
 use App\Http\Controllers\Api\Admin\ReportController;
@@ -16,6 +18,7 @@ use App\Http\Controllers\Api\Admin\ReasonCodeController;
 use App\Http\Controllers\Api\Admin\HealthController;
 use App\Http\Controllers\Api\VerificationController;
 use App\Http\Controllers\Api\PricingController;
+use App\Http\Controllers\Api\PassportVerificationController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -68,6 +71,12 @@ Route::prefix('pricing')->middleware('throttle:60,1')->group(function () {
     Route::get('/tiers', [PricingController::class, 'getServiceTiers']);
     Route::get('/examples', [PricingController::class, 'getExamples']);
 });
+
+// Public: unified travel authorization verification (for airlines / external systems)
+Route::get('/verify-travel', [VerificationController::class, 'verifyTravel'])->middleware('throttle:60,1');
+
+// Public: test passport verification endpoint (to be replaced with real integration)
+Route::post('/passport/verify-test', [PassportVerificationController::class, 'simulate'])->middleware('throttle:30,1');
 
 // Public: track application by reference number - strict rate limiting to prevent abuse
 Route::post('/track', [ApplicationController::class, 'track'])->middleware('throttle:30,1');
@@ -124,8 +133,8 @@ Route::middleware(['auth:sanctum'])->prefix('border')->group(function () {
 });
 
 // Airline API endpoints (for airlines to verify passenger travel authorization)
-// SECURITY: Requires authentication via API token
-Route::prefix('airline')->middleware(['auth:sanctum', 'throttle:100,1'])->group(function () {
+// SECURITY: Requires authentication via API token + airline role
+Route::prefix('airline')->middleware(['auth:sanctum', \App\Http\Middleware\EnsureRole::class . ':airline', 'throttle:100,1'])->group(function () {
     Route::post('/verify-passenger', [\App\Http\Controllers\Api\AirlineController::class, 'verifyPassenger']);
     Route::post('/verify-qr', [\App\Http\Controllers\Api\AirlineController::class, 'verifyQrCode']);
     Route::post('/batch-verify', [\App\Http\Controllers\Api\AirlineController::class, 'batchVerify']);
@@ -247,6 +256,16 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         Route::post('/support/tickets/{ticket}/override-approve', [\App\Http\Controllers\Api\SupportController::class, 'overrideToApproved']);
     });
 
+    // GIS Admin routes (agency-level management)
+    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':gis_admin,admin'])->prefix('gis/admin')->group(function () {
+        Route::get('/overview', [GisAdminController::class, 'overview']);
+        Route::get('/applicants', [GisAdminController::class, 'applicants']);
+        Route::get('/officers', [GisAdminController::class, 'officers']);
+        Route::get('/applications', [GisAdminController::class, 'applications']);
+        Route::get('/eta/overview', [GisAdminController::class, 'etaOverview']);
+        Route::get('/eta/applications', [GisAdminController::class, 'etaApplications']);
+    });
+
     /*
     |----------------------------------------------------------------------
     | MFA Reviewer Routes
@@ -270,6 +289,16 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         Route::post('/escalations/{application}/issue', [EscalationController::class, 'issueVisa']);
         Route::post('/escalations/{application}/return', [EscalationController::class, 'returnToGis']);
         Route::post('/escalations/{application}/revert', [EscalationController::class, 'revertDecision']);
+    });
+
+    // MFA Admin routes (mission-level management)
+    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':mfa_admin,admin'])->prefix('mfa/admin')->group(function () {
+        Route::get('/overview', [MfaAdminController::class, 'overview']);
+        Route::get('/applicants', [MfaAdminController::class, 'applicants']);
+        Route::get('/officers', [MfaAdminController::class, 'officers']);
+        Route::get('/applications', [MfaAdminController::class, 'applications']);
+        Route::get('/eta/overview', [MfaAdminController::class, 'etaOverview']);
+        Route::get('/eta/applications', [MfaAdminController::class, 'etaApplications']);
     });
 
     /*
@@ -364,5 +393,22 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         Route::post('/routing/applications/{application}/reroute', [\App\Http\Controllers\Api\Admin\RoutingController::class, 'reRouteApplication']);
         Route::get('/routing/statistics', [\App\Http\Controllers\Api\Admin\RoutingController::class, 'statistics']);
         Route::post('/routing/test', [\App\Http\Controllers\Api\Admin\RoutingController::class, 'testRouting']);
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Risk Scoring Routes
+    |--------------------------------------------------------------------------
+    */
+    Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::class, 'throttle:60,1'])->prefix('risk-scoring')->group(function () {
+        Route::get('/applications/{application}/calculate', [\App\Http\Controllers\Api\RiskScoringController::class, 'calculate']);
+        Route::get('/applications/{application}', [\App\Http\Controllers\Api\RiskScoringController::class, 'show']);
+        Route::post('/applications/{application}/rescore', [\App\Http\Controllers\Api\RiskScoringController::class, 'manualRescore']);
+        Route::post('/applications/{application}/notes', [\App\Http\Controllers\Api\RiskScoringController::class, 'addNotes']);
+        Route::post('/applications/{application}/override', [\App\Http\Controllers\Api\RiskScoringController::class, 'override']);
+        Route::put('/applications/{application}/status', [\App\Http\Controllers\Api\RiskScoringController::class, 'updateStatus']);
+        
+        Route::post('/batch/calculate', [\App\Http\Controllers\Api\RiskScoringController::class, 'batchCalculate']);
+        Route::get('/statistics', [\App\Http\Controllers\Api\RiskScoringController::class, 'statistics']);
     });
 });

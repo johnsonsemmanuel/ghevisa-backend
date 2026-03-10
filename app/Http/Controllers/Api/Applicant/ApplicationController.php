@@ -106,7 +106,8 @@ class ApplicationController extends Controller
             'date_of_birth'  => 'required|date|before:today',
             'passport_number'=> 'required|string|max:50',
             'passport_issue_date' => 'nullable|date|before_or_equal:today',
-            'passport_expiry'=> 'nullable|date|after:today',
+            'passport_expiry'=> 'required|date',
+            'passport_issuing_authority' => 'nullable|string|max:255',
             'nationality'    => 'required|string|max:3',
             'email'          => 'required|email',
             'phone'          => 'nullable|string|max:20',
@@ -124,6 +125,22 @@ class ApplicationController extends Controller
             return response()->json([
                 'message' => __('application.nationality_ineligible'),
             ], 422);
+        }
+
+        // Business rule: enforce passport expiry rules
+        if (!empty($validated['passport_expiry'])) {
+            $expiry = now()->parse($validated['passport_expiry']);
+            if ($expiry->lt(now()->startOfDay())) {
+                return response()->json([
+                    'message' => __('passport.expired'),
+                ], 422);
+            }
+
+            $months = now()->startOfDay()->diffInMonths($expiry);
+            if ($months < 6) {
+                // Allow creation but surface a warning flag on the application later
+                $validated['passport_near_expiry'] = true;
+            }
         }
 
         $application = $this->applicationService->createDraft($validated, $request->user());
@@ -184,7 +201,8 @@ class ApplicationController extends Controller
             'date_of_birth'    => 'sometimes|date|before:today',
             'passport_number'  => 'sometimes|string|max:50',
             'passport_issue_date' => 'nullable|date|before_or_equal:today',
-            'passport_expiry'  => 'nullable|date|after:today',
+            'passport_expiry'  => 'nullable|date',
+            'passport_issuing_authority' => 'nullable|string|max:255',
             'nationality'      => 'sometimes|string|max:3',
             'email'            => 'sometimes|email',
             'phone'            => 'nullable|string|max:20',

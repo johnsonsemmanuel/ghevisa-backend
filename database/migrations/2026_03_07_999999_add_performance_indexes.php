@@ -86,7 +86,7 @@ return new class extends Migration
             $table->index(['document_type'], 'idx_documents_type');
             
             // Status queries
-            $table->index(['status'], 'idx_documents_status');
+            $table->index(['verification_status'], 'idx_documents_status');
             
             // Upload date queries
             $table->index(['created_at'], 'idx_documents_created');
@@ -105,7 +105,7 @@ return new class extends Migration
             $table->index(['to_status'], 'idx_status_history_to_status');
             
             // User tracking
-            $table->index(['changed_by_user_id'], 'idx_status_history_user');
+            $table->index(['changed_by'], 'idx_status_history_user');
             
             // Composite for application timeline
             $table->index(['application_id', 'created_at'], 'idx_status_history_timeline');
@@ -118,13 +118,13 @@ return new class extends Migration
             $table->index(['application_id'], 'idx_notes_application');
             
             // Author queries
-            $table->index(['author_id'], 'idx_notes_author');
+            $table->index(['user_id'], 'idx_notes_author');
             
             // Date queries
             $table->index(['created_at'], 'idx_notes_created');
             
             // Visibility
-            $table->index(['is_visible_to_applicant'], 'idx_notes_visibility');
+            $table->index(['is_private'], 'idx_notes_visibility');
         });
 
         // Reason codes indexes
@@ -133,7 +133,7 @@ return new class extends Migration
             $table->index(['action_type'], 'idx_reason_codes_action');
             
             // Agency-specific codes
-            $table->index(['agency'], 'idx_reason_codes_agency');
+            // $table->index(['agency'], 'idx_reason_codes_agency');
             
             // Active codes
             $table->index(['is_active'], 'idx_reason_codes_active');
@@ -220,7 +220,7 @@ return new class extends Migration
 
         Schema::table('reason_codes', function (Blueprint $table) {
             $table->dropIndex('idx_reason_codes_action');
-            $table->dropIndex('idx_reason_codes_agency');
+            // $table->dropIndex('idx_reason_codes_agency');
             $table->dropIndex('idx_reason_codes_active');
         });
 

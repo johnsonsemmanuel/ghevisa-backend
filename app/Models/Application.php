@@ -15,6 +15,40 @@ class Application extends Model
 {
     use HasFactory, SoftDeletes, Auditable, EncryptsPii;
 
+    /**
+     * Queue names for officer workflow.
+     * These align with the operational spec (review vs approval queues)
+     * and are referenced by both backend services and frontend dashboards.
+     */
+    public const QUEUE_REVIEW   = 'review_queue';
+    public const QUEUE_APPROVAL = 'approval_queue';
+    public const QUEUE_COMPLETED = 'completed';
+
+    /**
+     * Canonical internal status values for the application lifecycle.
+     * These correspond to the spec:
+     * DRAFT → SUBMITTED/PAID → UNDER_REVIEW → PENDING_APPROVAL → APPROVED/DENIED → ISSUED.
+     */
+    public const STATUS_DRAFT               = 'draft';
+    public const STATUS_SUBMITTED           = 'submitted';
+    public const STATUS_PENDING_PAYMENT     = 'pending_payment';
+    public const STATUS_UNDER_REVIEW        = 'under_review';
+    public const STATUS_PENDING_APPROVAL    = 'pending_approval';
+    public const STATUS_ESCALATED           = 'escalated';
+    public const STATUS_ADDITIONAL_INFO     = 'additional_info_requested';
+    public const STATUS_APPROVED            = 'approved';
+    public const STATUS_DENIED              = 'denied';
+    public const STATUS_ISSUED              = 'issued';
+    public const STATUS_CANCELLED           = 'cancelled';
+
+    /**
+     * Passport verification statuses.
+     */
+    public const PASSPORT_VERIFICATION_PENDING = 'pending';
+    public const PASSPORT_VERIFICATION_PASSED  = 'passed';
+    public const PASSPORT_VERIFICATION_FAILED  = 'failed';
+    public const PASSPORT_VERIFICATION_REVIEW  = 'manual_review';
+
     protected $encryptedFields = [
         'first_name_encrypted',
         'last_name_encrypted',
@@ -49,6 +83,7 @@ class Application extends Model
         'country_of_birth',
         'passport_issue_date',
         'passport_expiry',
+        'passport_issuing_authority',
         'intended_arrival',
         'duration_days',
         'eta_validity_days',
@@ -107,6 +142,9 @@ class Application extends Model
         'review_completed_at',
         'approval_started_at',
         'approval_completed_at',
+        'passport_verification_status',
+        'passport_verification_source',
+        'passport_verification_at',
     ];
 
     protected function casts(): array

@@ -182,10 +182,11 @@ class QrCodeService
     {
         $data = $application->reference_number . 
                 $application->passport_number . 
-                $application->decided_at?->format('Ymd') .
-                config('app.key');
+                $application->decided_at?->format('Ymd');
 
-        return hash_hmac('sha256', $data, config('app.key'));
+        $secret = config('services.qr.evisa_secret');
+
+        return hash_hmac('sha256', $data, $secret);
     }
 
     /**
@@ -197,6 +198,8 @@ class QrCodeService
                 $eta->reference_number . 
                 $eta->approved_at?->format('Ymd');
 
-        return hash_hmac('sha256', $data, config('app.key'));
+        $secret = config('services.qr.eta_secret');
+
+        return hash_hmac('sha256', $data, $secret);
     }
 }
