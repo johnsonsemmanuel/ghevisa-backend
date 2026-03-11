@@ -19,7 +19,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'api.error' => \App\Http\Middleware\ApiErrorHandler::class,
             'auth.errors' => \App\Http\Middleware\HandleAuthenticationErrors::class,
             'robust.throttle' => \App\Http\Middleware\RobustRateLimiting::class,
+            'aeropass.auth' => \App\Http\Middleware\AeropassBasicAuth::class,
         ]);
+
+        // Allow Sanctum to authenticate using the HttpOnly `auth_token` cookie.
+        // This bridges cookie storage to the bearer-token mechanism Sanctum expects.
+        $middleware->append(\App\Http\Middleware\AttachAuthTokenFromCookie::class);
 
         // Security headers for all responses
         $middleware->append(\App\Http\Middleware\SecurityHeaders::class);

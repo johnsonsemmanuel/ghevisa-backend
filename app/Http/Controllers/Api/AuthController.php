@@ -13,6 +13,32 @@ use Illuminate\Validation\Rules\Password;
 class AuthController extends Controller
 {
     /**
+     * Build the HttpOnly auth cookie with env-configured attributes.
+     *
+     * Important: For local HTTP development, SESSION_SECURE_COOKIE should be false.
+     * For cross-site deployments (separate frontend/backend domains), set SESSION_SAME_SITE=none and SESSION_SECURE_COOKIE=true.
+     */
+    private function authCookie(string $token, ?int $minutes = null): \Symfony\Component\HttpFoundation\Cookie
+    {
+        $minutes ??= (int) config('sanctum.expiration', 60);
+
+        $domain = config('session.domain'); // null = current domain
+        $secure = (bool) config('session.secure', false);
+        $sameSite = config('session.same_site', 'lax');
+
+        return cookie(
+            'auth_token', // name
+            $token,       // value
+            $minutes,     // minutes
+            '/',          // path
+            $domain,      // domain
+            $secure,      // secure (HTTPS only when true)
+            true,         // httpOnly
+            false,        // raw
+            $sameSite     // sameSite
+        );
+    }
+    /**
      * Register a new applicant account.
      */
     public function register(Request $request): JsonResponse
@@ -21,7 +47,16 @@ class AuthController extends Controller
             'first_name' => 'required|string|max:255',
             'last_name'  => 'required|string|max:255',
             'email'      => 'required|email|unique:users,email',
-            'password'   => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()],
+            // SECURITY FIX MED-02: Enhanced password requirements
+            'password'   => [
+                'required',
+                'confirmed',
+                Password::min(12)           // Increased from 8 to 12
+                    ->mixedCase()           // Require upper and lowercase
+                    ->numbers()             // Require numbers
+                    ->symbols()             // ADDED: Require special characters
+                    ->uncompromised()       // ADDED: Check against breach database
+            ],
             'phone'      => 'nullable|string|max:20',
             'locale'     => 'nullable|in:en,fr',
         ]);
@@ -80,10 +115,15 @@ class AuthController extends Controller
 
                 if ($attempts >= 5) {
                     $lockData['locked_until'] = now()->addMinutes(15);
+                    
+                    // SECURITY FIX MED-05: Send account lockout notification
+                    $this->sendAccountLockoutNotification($user, $request);
+                    
                     \Illuminate\Support\Facades\Log::warning('Account locked after failed attempts', [
                         'email' => $validated['email'],
                         'attempts' => $attempts,
                         'ip' => $request->ip(),
+                        'user_agent' => $request->userAgent(),
                     ]);
                 }
 
@@ -119,7 +159,7 @@ class AuthController extends Controller
         }
 
         // HIGH-08: Officer MFA
-        $officerRoles = ['gis_admin', 'gis_reviewer', 'gis_approver', 'gis_officer', 'mfa_admin', 'mfa_reviewer', 'mfa_approver', 'admin'];
+        $officerRoles = ['gis_admin', 'gis_reviewer', 'gis_approver', 'gis_officer', 'mfa_admin', 'mfa_reviewer', 'mfa_approver', 'admin', 'border_officer', 'border_supervisor'];
         if (in_array($user->role, $officerRoles)) {
             $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
             $user->update([
@@ -149,8 +189,8 @@ class AuthController extends Controller
         return response()->json([
             'message' => __('auth.login_success'),
             'user'    => $this->userResource($user),
-            'token'   => $token,
-        ]);
+            // Token no longer sent in response body for security
+        ])->cookie($this->authCookie($token, (int) config('sanctum.expiration', 60)));
     }
 
     /**
@@ -185,8 +225,7 @@ class AuthController extends Controller
         return response()->json([
             'message' => __('auth.login_success'),
             'user'    => $this->userResource($user),
-            'token'   => $token,
-        ]);
+        ])->cookie($this->authCookie($token, (int) config('sanctum.expiration', 60)));
     }
 
     /**
@@ -201,9 +240,12 @@ class AuthController extends Controller
             $token->delete();
         }
 
+        // SECURITY FIX: Clear the HttpOnly cookie
+        $cookie = cookie()->forget('auth_token');
+
         return response()->json([
             'message' => __('auth.logged_out'),
-        ]);
+        ])->cookie($cookie);
     }
 
     /**
@@ -243,7 +285,16 @@ class AuthController extends Controller
     {
         $validated = $request->validate([
             'current_password' => 'required|string',
-            'password'         => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()],
+            // SECURITY FIX MED-02: Enhanced password requirements
+            'password'         => [
+                'required',
+                'confirmed',
+                Password::min(12)
+                    ->mixedCase()
+                    ->numbers()
+                    ->symbols()
+                    ->uncompromised()
+            ],
         ]);
 
         $user = $request->user();
@@ -254,6 +305,16 @@ class AuthController extends Controller
             ], 422);
         }
 
+        // SECURITY FIX MED-02: Check password history (prevent reuse of last 5 passwords)
+        if ($this->isPasswordReused($user, $validated['password'])) {
+            return response()->json([
+                'message' => 'Cannot reuse any of your last 5 passwords. Please choose a different password.',
+            ], 422);
+        }
+
+        // Store old password in history before updating
+        $this->storePasswordHistory($user, $user->password);
+
         $user->update([
             'password' => Hash::make($validated['password']),
         ]);
@@ -261,6 +322,107 @@ class AuthController extends Controller
         return response()->json([
             'message' => __('auth.password_changed'),
         ]);
+    }
+
+    /**
+     * Check if password was used in the last 5 password changes.
+     */
+    protected function isPasswordReused(User $user, string $newPassword): bool
+    {
+        $history = \DB::table('password_history')
+            ->where('user_id', $user->id)
+            ->orderBy('created_at', 'desc')
+            ->limit(5)
+            ->pluck('password_hash');
+
+        foreach ($history as $oldHash) {
+            if (Hash::check($newPassword, $oldHash)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Store password in history table.
+     */
+    protected function storePasswordHistory(User $user, string $passwordHash): void
+    {
+        \DB::table('password_history')->insert([
+            'user_id' => $user->id,
+            'password_hash' => $passwordHash,
+            'created_at' => now(),
+        ]);
+
+        // Keep only last 5 passwords
+        $keepIds = \DB::table('password_history')
+            ->where('user_id', $user->id)
+            ->orderBy('created_at', 'desc')
+            ->limit(5)
+            ->pluck('id');
+
+        \DB::table('password_history')
+            ->where('user_id', $user->id)
+            ->whereNotIn('id', $keepIds)
+            ->delete();
+    }
+
+    /**
+     * SECURITY FIX MED-05: Send account lockout notification email
+     */
+    protected function sendAccountLockoutNotification(User $user, Request $request): void
+    {
+        try {
+            \Illuminate\Support\Facades\Mail::to($user->email)->send(
+                new \App\Mail\AccountLockedNotification($user, [
+                    'ip_address' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                    'locked_until' => now()->addMinutes(15),
+                    'location' => $this->getLocationFromIp($request->ip()),
+                ])
+            );
+        } catch (\Exception $e) {
+            // Log error but don't fail the login attempt
+            \Illuminate\Support\Facades\Log::error('Failed to send lockout notification', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Get approximate location from IP address (optional enhancement)
+     */
+    protected function getLocationFromIp(string $ip): string
+    {
+        // For now, just return the IP
+        // In production, you could use a GeoIP service
+        return $ip;
+    }
+
+    /**
+     * SECURITY FIX HIGH-01: Refresh authentication token
+     * Allows extending session without re-login
+     */
+    public function refresh(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        
+        // Delete old token
+        $oldToken = $request->user()->currentAccessToken();
+        if ($oldToken && !($oldToken instanceof \Laravel\Sanctum\TransientToken)) {
+            $oldToken->delete();
+        }
+
+        // Create new token
+        $primaryRole = $user->roles->first()?->name ?? 'user';
+        $token = $user->createToken($primaryRole . '-token')->plainTextToken;
+
+        return response()->json([
+            'message' => 'Token refreshed successfully',
+            'expires_in' => config('sanctum.expiration', 15) * 60, // seconds
+        ])->cookie($this->authCookie($token, (int) config('sanctum.expiration', 15)));
     }
 
     /**
@@ -337,6 +499,10 @@ class AuthController extends Controller
             'mfa_approver' => 'MFA_APPROVAL_OFFICER',
             'admin' => 'SYSTEM_ADMIN',
             'applicant' => 'APPLICANT',
+            'border_officer' => 'BORDER_OFFICER',
+            'border_supervisor' => 'BORDER_SUPERVISOR',
+            'airline_staff' => 'AIRLINE_STAFF',
+            'airline_admin' => 'AIRLINE_ADMIN',
         ];
 
         $frontendRole = $roleMapping[$user->role] ?? strtoupper($user->role);
