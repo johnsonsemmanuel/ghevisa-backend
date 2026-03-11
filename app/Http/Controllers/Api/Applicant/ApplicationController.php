@@ -97,26 +97,171 @@ class ApplicationController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            // Visa Setup
             'visa_type_id'   => 'required|exists:visa_types,id',
             'visa_channel'   => 'nullable|string|in:e-visa,regular',
             'entry_type'     => 'nullable|string|in:single,multiple',
             'service_tier_id'=> 'nullable|exists:service_tiers,id',
+            
+            // Applicant Details
             'first_name'     => 'required|string|max:255',
             'last_name'      => 'required|string|max:255',
+            'other_names'    => 'nullable|string|max:255',
             'date_of_birth'  => 'required|date|before:today',
-            'passport_number'=> 'required|string|max:50',
-            'passport_issue_date' => 'nullable|date|before_or_equal:today',
-            'passport_expiry'=> 'required|date',
-            'passport_issuing_authority' => 'nullable|string|max:255',
-            'nationality'    => 'required|string|max:3',
-            'email'          => 'required|email',
-            'phone'          => 'nullable|string|max:20',
-            'gender'         => 'nullable|string|in:male,female',
-            'marital_status' => 'nullable|string|in:single,married,divorced,widowed,separated',
-            'profession'     => 'nullable|string|max:255',
-            'country_of_birth' => 'nullable|string|max:3',
+            'gender'         => 'required|string|in:male,female',
+            'marital_status' => 'required|string|in:single,married,divorced,widowed,separated',
+            'country_of_birth' => 'required|string|max:3',
             'place_of_birth' => 'nullable|string|max:255',
+            'nationality'    => 'required|string|max:3',
+            'profession'     => 'required|string|max:255',
+            
+            // Passport Information
+            'passport_number'=> 'required|string|max:50',
+            'passport_issuing_authority' => 'nullable|string|max:255',
+            'passport_issue_date' => 'required|date|before_or_equal:today',
+            'passport_expiry'=> 'required|date|after:today',
+            'passport_issue_place' => 'nullable|string|max:255',
+            
+            // Contact Information
+            'email'          => 'required|email',
+            'phone'          => 'required|string|max:20',
+            'phone_country'  => 'nullable|string|max:3',
+            
+            // Travel Details
+            'intended_arrival' => 'required|date|after:today',
+            'duration_days'  => 'required|integer|min:1|max:365',
+            'visa_duration'  => 'nullable|string|max:50',
+            'port_of_entry'  => 'required|string|max:255',
+            'place_of_embarkation' => 'nullable|string|max:255',
+            'destination_city' => 'nullable|string|max:255',
+            'address_in_ghana' => 'required|string|max:500',
+            'purpose_of_visit' => 'required|string|max:255',
+            'purpose_details' => 'nullable|string|max:1000',
+            
+            // Travel History
+            'visited_ghana_before' => 'required|string|in:yes,no',
+            'previous_visa_number' => 'nullable|string|max:50',
+            'visited_other_countries' => 'required|string|in:yes,no',
+            'visited_country_1' => 'nullable|string|max:255',
+            'visited_country_2' => 'nullable|string|max:255',
+            'visited_country_3' => 'nullable|string|max:255',
+            
+            // Accommodation
+            'accommodation_type' => 'required|string|in:hotel,family',
+            'hotel_name'     => 'nullable|string|max:255',
+            'hotel_booking_reference' => 'nullable|string|max:255',
+            'accommodation_address' => 'nullable|string|max:500',
+            'host_name'      => 'nullable|string|max:255',
+            'host_phone'     => 'nullable|string|max:20',
+            'host_address'   => 'nullable|string|max:500',
+            'host_relationship' => 'nullable|string|max:255',
+            
+            // Health Declaration
+            'health_infectious_travel' => 'nullable|string|in:yes,no',
+            'health_infectious_countries' => 'nullable|string|max:500',
+            
+            // Security & Travel Declaration
+            'high_risk_travel' => 'nullable|string|in:yes,no',
+            'entry_denied_before' => 'nullable|string|in:yes,no',
+            'overstayed_before' => 'nullable|string|in:yes,no',
+            'international_sanctions' => 'nullable|string|in:yes,no',
+            'criminal_conviction' => 'nullable|string|in:yes,no',
+            
+            // Additional fields
+            'current_address' => 'nullable|string|max:500',
+            'city'           => 'nullable|string|max:255',
+            'state_province' => 'nullable|string|max:255',
+            'postal_code'    => 'nullable|string|max:20',
+            'country_of_residence' => 'nullable|string|max:3',
+            'airline'        => 'nullable|string|max:255',
+            'flight_number'  => 'nullable|string|max:50',
+            'return_date'    => 'nullable|date|after:intended_arrival',
+            
+            // Employment (optional)
+            'occupation'     => 'nullable|string|max:255',
+            'employer_name'  => 'nullable|string|max:255',
+            'employer_address' => 'nullable|string|max:500',
+            'employer_phone' => 'nullable|string|max:20',
+            
+            // Business (optional)
+            'company_name'   => 'nullable|string|max:255',
+            'company_address' => 'nullable|string|max:500',
+            'job_title'      => 'nullable|string|max:255',
+            'host_company_name' => 'nullable|string|max:255',
+            'host_company_address' => 'nullable|string|max:500',
+            'host_contact_name' => 'nullable|string|max:255',
+            'host_contact_phone' => 'nullable|string|max:20',
+            'business_purpose' => 'nullable|string|max:255',
+            'business_details' => 'nullable|string|max:1000',
         ]);
+
+        // Validate accommodation based on type
+        if ($validated['accommodation_type'] === 'hotel') {
+            if (empty($validated['hotel_name']) || empty($validated['accommodation_address'])) {
+                return response()->json([
+                    'message' => 'Hotel name and address are required for hotel accommodation',
+                    'errors' => [
+                        'hotel_name' => empty($validated['hotel_name']) ? ['Hotel name is required'] : [],
+                        'accommodation_address' => empty($validated['accommodation_address']) ? ['Accommodation address is required'] : [],
+                    ],
+                ], 422);
+            }
+        } elseif ($validated['accommodation_type'] === 'family') {
+            if (empty($validated['host_name']) || empty($validated['host_phone']) || empty($validated['host_address'])) {
+                return response()->json([
+                    'message' => 'Host name, phone, and address are required for family/friend accommodation',
+                    'errors' => [
+                        'host_name' => empty($validated['host_name']) ? ['Host name is required'] : [],
+                        'host_phone' => empty($validated['host_phone']) ? ['Host phone is required'] : [],
+                        'host_address' => empty($validated['host_address']) ? ['Host address is required'] : [],
+                    ],
+                ], 422);
+            }
+        }
+
+        // Validate visited countries if visited_other_countries is yes
+        if (($validated['visited_other_countries'] ?? 'no') === 'yes') {
+            if (empty($validated['visited_country_1']) || empty($validated['visited_country_2']) || empty($validated['visited_country_3'])) {
+                return response()->json([
+                    'message' => 'Please provide at least 3 countries you have visited',
+                    'errors' => [
+                        'visited_country_1' => empty($validated['visited_country_1']) ? ['First country is required'] : [],
+                        'visited_country_2' => empty($validated['visited_country_2']) ? ['Second country is required'] : [],
+                        'visited_country_3' => empty($validated['visited_country_3']) ? ['Third country is required'] : [],
+                    ],
+                ], 422);
+            }
+        }
+
+        // Validate health infectious countries if health_infectious_travel is yes
+        if (($validated['health_infectious_travel'] ?? 'no') === 'yes') {
+            if (empty($validated['health_infectious_countries'])) {
+                return response()->json([
+                    'message' => 'Please specify which countries with infectious diseases you have visited',
+                    'errors' => [
+                        'health_infectious_countries' => ['This field is required when you have travelled to areas with infectious diseases'],
+                    ],
+                ], 422);
+            }
+        }
+
+        // Convert yes/no strings to booleans for database
+        $booleanFields = [
+            'visited_ghana_before',
+            'visited_other_countries',
+            'health_infectious_travel',
+            'high_risk_travel',
+            'entry_denied_before',
+            'overstayed_before',
+            'international_sanctions',
+            'criminal_conviction',
+        ];
+
+        foreach ($booleanFields as $field) {
+            if (isset($validated[$field])) {
+                $validated[$field] = $validated[$field] === 'yes';
+            }
+        }
 
         // Check blacklist
         $visaType = VisaType::findOrFail($validated['visa_type_id']);
@@ -132,7 +277,7 @@ class ApplicationController extends Controller
             $expiry = now()->parse($validated['passport_expiry']);
             if ($expiry->lt(now()->startOfDay())) {
                 return response()->json([
-                    'message' => __('passport.expired'),
+                    'message' => 'Your passport has expired. Please renew your passport before applying.',
                 ], 422);
             }
 

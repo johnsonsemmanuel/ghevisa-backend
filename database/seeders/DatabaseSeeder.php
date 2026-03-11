@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
             ServiceTierSeeder::class,
             MfaMissionSeeder::class,
             RoutingRuleSeeder::class,
+            AdditionalUsersSeeder::class,
         ]);
 
         // ── Visa Types ────────────────────────────────────
@@ -270,6 +271,32 @@ class DatabaseSeeder extends Seeder
             'password'   => Hash::make('password'),
             'role'       => 'gis_admin',
             'agency'     => 'GIS',
+            'is_active'  => true,
+            'locale'     => 'en',
+            'email_verified_at' => now(),
+        ]);
+
+        // MFA Approver
+        User::create([
+            'first_name' => 'Yaw',
+            'last_name'  => 'Osei',
+            'email'      => 'mfa.approver@mfa.gov.gh',
+            'password'   => Hash::make('password'),
+            'role'       => 'mfa_approver',
+            'agency'     => 'MFA',
+            'is_active'  => true,
+            'locale'     => 'en',
+            'email_verified_at' => now(),
+        ]);
+
+        // MFA Admin
+        User::create([
+            'first_name' => 'Abena',
+            'last_name'  => 'Owusu',
+            'email'      => 'mfa.admin@mfa.gov.gh',
+            'password'   => Hash::make('password'),
+            'role'       => 'mfa_admin',
+            'agency'     => 'MFA',
             'is_active'  => true,
             'locale'     => 'en',
             'email_verified_at' => now(),

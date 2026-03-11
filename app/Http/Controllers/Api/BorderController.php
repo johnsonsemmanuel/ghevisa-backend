@@ -9,6 +9,7 @@ use App\Models\EtaApplication;
 use App\Models\RiskAssessment;
 use App\Models\Watchlist;
 use App\Services\QrCodeService;
+use App\Services\TaidService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
@@ -16,6 +17,184 @@ use Illuminate\Support\Facades\Log;
 
 class BorderController extends Controller
 {
+    public function __construct(
+        protected TaidService $taidService
+    ) {}
+
+    /**
+     * Verify a traveler using TAID (Travel Authorization ID)
+     * 
+     * This is the unified verification endpoint that works with both ETA and Visa
+     */
+    public function verifyByTaid(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'taid' => 'required|string',
+            'passport_number' => 'required|string',
+        ]);
+
+        Log::info('TAID verification attempt', [
+            'taid' => $validated['taid'],
+            'passport_suffix' => substr($validated['passport_number'], -4),
+            'ip' => $request->ip(),
+            'user_id' => $request->user()?->id,
+        ]);
+
+        // Validate TAID format
+        if (!$this->taidService->isValidFormat($validated['taid'])) {
+            return response()->json([
+                'valid' => false,
+                'status' => 'invalid_format',
+                'message' => 'Invalid TAID format',
+            ], 422);
+        }
+
+        // Find authorization by TAID
+        $authorization = $this->taidService->findByTaid($validated['taid']);
+
+        if (!$authorization) {
+            return response()->json([
+                'valid' => false,
+                'status' => 'not_found',
+                'message' => 'Travel authorization not found',
+            ], 404);
+        }
+
+        $record = $authorization['record'];
+        $type = $authorization['type'];
+
+        // Verify passport number matches
+        $storedPassport = $type === 'eta' 
+            ? Crypt::decryptString($record->passport_number_encrypted)
+            : $record->passport_number;
+
+        if (strtoupper($storedPassport) !== strtoupper($validated['passport_number'])) {
+            return response()->json([
+                'valid' => false,
+                'status' => 'invalid',
+                'message' => 'Passport number does not match authorization record',
+            ], 403);
+        }
+
+        // Check authorization validity based on type
+        if ($type === 'eta') {
+            return $this->verifyEtaByTaid($record, $validated['taid']);
+        } else {
+            return $this->verifyVisaByTaid($record, $validated['taid']);
+        }
+    }
+
+    /**
+     * Verify ETA authorization
+     */
+    protected function verifyEtaByTaid(EtaApplication $eta, string $taid): JsonResponse
+    {
+        // Check status
+        if ($eta->status !== 'approved') {
+            return response()->json([
+                'valid' => false,
+                'status' => 'not_approved',
+                'message' => 'ETA is not approved',
+                'eta_status' => $eta->status,
+            ]);
+        }
+
+        // Check expiry
+        if ($eta->expires_at && $eta->expires_at < now()) {
+            return response()->json([
+                'valid' => false,
+                'status' => 'expired',
+                'message' => 'ETA has expired',
+                'expired_on' => $eta->expires_at->format('Y-m-d'),
+            ]);
+        }
+
+        // Check entry consumption for single-entry ETAs
+        if ($eta->entry_type === 'single' && $eta->entry_consumed) {
+            return response()->json([
+                'valid' => false,
+                'status' => 'entry_consumed',
+                'message' => 'Single-entry ETA already used',
+                'entry_date' => $eta->entry_date?->format('Y-m-d H:i:s'),
+                'port_used' => $eta->port_of_entry_used,
+            ]);
+        }
+
+        return response()->json([
+            'valid' => true,
+            'status' => 'valid',
+            'message' => 'ETA verified successfully',
+            'authorization' => [
+                'type' => 'eta',
+                'taid' => $taid,
+                'eta_number' => $eta->eta_number,
+                'reference_number' => $eta->reference_number,
+                'holder_name' => Crypt::decryptString($eta->first_name_encrypted) . ' ' . Crypt::decryptString($eta->last_name_encrypted),
+                'nationality' => Crypt::decryptString($eta->nationality_encrypted),
+                'entry_type' => $eta->entry_type,
+                'valid_until' => $eta->expires_at?->format('Y-m-d'),
+                'approved_on' => $eta->approved_at?->format('Y-m-d'),
+                'entry_consumed' => $eta->entry_consumed,
+            ],
+        ]);
+    }
+
+    /**
+     * Verify Visa authorization
+     */
+    protected function verifyVisaByTaid(Application $application, string $taid): JsonResponse
+    {
+        // Check status
+        if ($application->status !== 'approved') {
+            return response()->json([
+                'valid' => false,
+                'status' => 'not_approved',
+                'message' => 'Visa is not approved',
+                'visa_status' => $application->status,
+            ]);
+        }
+
+        // Check expiry
+        $visaType = $application->visaType;
+        $expiryDate = $application->decided_at?->addDays($visaType?->max_duration_days ?? 90);
+        $isExpired = $expiryDate && $expiryDate < now();
+
+        if ($isExpired) {
+            return response()->json([
+                'valid' => false,
+                'status' => 'expired',
+                'message' => 'Visa has expired',
+                'expired_on' => $expiryDate->format('Y-m-d'),
+            ]);
+        }
+
+        // Check risk flags
+        $riskWarnings = [];
+        if ($application->watchlist_flagged) {
+            $riskWarnings[] = 'WATCHLIST FLAG - Secondary inspection required';
+        }
+        if ($application->risk_level === 'high' || $application->risk_level === 'critical') {
+            $riskWarnings[] = 'HIGH RISK - Manual verification recommended';
+        }
+
+        return response()->json([
+            'valid' => true,
+            'status' => 'valid',
+            'message' => 'Visa verified successfully',
+            'authorization' => [
+                'type' => 'visa',
+                'taid' => $taid,
+                'reference_number' => $application->reference_number,
+                'holder_name' => $application->first_name . ' ' . $application->last_name,
+                'nationality' => $application->nationality,
+                'visa_type' => $visaType?->name,
+                'entry_type' => $visaType?->entry_type ?? 'single',
+                'valid_until' => $expiryDate?->format('Y-m-d'),
+                'approved_on' => $application->decided_at?->format('Y-m-d'),
+            ],
+            'risk_warnings' => $riskWarnings,
+        ]);
+    }
     /**
      * Verify a traveler's visa/ETA at the border.
      */
@@ -964,5 +1143,197 @@ class BorderController extends Controller
             'risk_score' => rand(5, 20),
             'last_checked' => now()->toIso8601String(),
         ];
+    }
+
+    /**
+     * Confirm entry and mark ETA/Visa as consumed (single-entry enforcement).
+     * 
+     * This endpoint is called by border officers after verifying a traveler
+     * to mark their authorization as used and prevent reuse.
+     */
+    public function confirmEntry(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'document_type' => 'required|in:eta,visa',
+            'eta_number' => 'required_if:document_type,eta|string',
+            'visa_reference' => 'required_if:document_type,visa|string',
+            'passport_number' => 'required|string',
+            'port_of_entry' => 'required|string|max:100',
+            'flight_number' => 'nullable|string|max:20',
+            'airline' => 'nullable|string|max:100',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        $passport = strtoupper(trim($validated['passport_number']));
+        $officer = $request->user();
+
+        if ($validated['document_type'] === 'eta') {
+            $eta = EtaApplication::where('eta_number', $validated['eta_number'])->first();
+
+            if (!$eta) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'ETA_NOT_FOUND',
+                    'message' => 'ETA not found',
+                ], 404);
+            }
+
+            // Verify passport binding
+            $storedPassport = Crypt::decryptString($eta->passport_number_encrypted);
+            if (strtoupper($storedPassport) !== $passport) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'PASSPORT_MISMATCH',
+                    'message' => 'Passport number does not match ETA record',
+                ], 422);
+            }
+
+            // Check if already consumed (single-entry only)
+            if ($eta->entry_type === 'single' && $eta->entry_consumed) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'ETA_ALREADY_USED',
+                    'message' => 'This ETA has already been used for entry',
+                    'entry_date' => $eta->entry_date?->format('Y-m-d H:i:s'),
+                    'port_of_entry' => $eta->port_of_entry_used,
+                ], 422);
+            }
+
+            // Mark as consumed (for single-entry)
+            if ($eta->entry_type === 'single') {
+                $eta->update([
+                    'entry_consumed' => true,
+                    'entry_date' => now(),
+                    'port_of_entry_used' => $validated['port_of_entry'],
+                    'entry_officer_id' => $officer->id,
+                ]);
+            }
+
+            // Create border crossing record
+            $crossing = BorderCrossing::create([
+                'eta_application_id' => $eta->id,
+                'crossing_type' => 'entry',
+                'port_of_entry' => $validated['port_of_entry'],
+                'passport_number_encrypted' => $eta->passport_number_encrypted,
+                'nationality' => Crypt::decryptString($eta->nationality_encrypted),
+                'traveler_name_encrypted' => Crypt::encryptString(
+                    Crypt::decryptString($eta->first_name_encrypted) . ' ' .
+                    Crypt::decryptString($eta->last_name_encrypted)
+                ),
+                'verification_status' => 'valid',
+                'verification_notes' => $validated['notes'] ?? null,
+                'flight_number' => $validated['flight_number'] ?? null,
+                'airline' => $validated['airline'] ?? null,
+                'officer_id' => $officer->id,
+                'crossed_at' => now(),
+            ]);
+
+            Log::info('ETA entry confirmed', [
+                'eta_number' => $eta->eta_number,
+                'entry_type' => $eta->entry_type,
+                'consumed' => $eta->entry_consumed,
+                'port' => $validated['port_of_entry'],
+                'officer_id' => $officer->id,
+                'crossing_id' => $crossing->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Entry confirmed successfully',
+                'document_type' => 'ETA',
+                'eta_number' => $eta->eta_number,
+                'entry_type' => $eta->entry_type,
+                'entry_consumed' => $eta->entry_consumed,
+                'entry_date' => $eta->entry_date?->format('Y-m-d H:i:s'),
+                'port_of_entry' => $eta->port_of_entry_used,
+                'crossing_id' => $crossing->id,
+            ]);
+        }
+
+        // Handle Visa entry confirmation
+        if ($validated['document_type'] === 'visa') {
+            $visa = Application::where('reference_number', $validated['visa_reference'])->first();
+
+            if (!$visa) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'VISA_NOT_FOUND',
+                    'message' => 'Visa not found',
+                ], 404);
+            }
+
+            // Verify passport binding
+            if (strtoupper($visa->passport_number) !== $passport) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'PASSPORT_MISMATCH',
+                    'message' => 'Passport number does not match visa record',
+                ], 422);
+            }
+
+            // Check if already consumed (single-entry only)
+            if ($visa->entry_type === 'single' && $visa->entry_consumed) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'VISA_ALREADY_USED',
+                    'message' => 'This visa has already been used for entry',
+                    'entry_date' => $visa->entry_date?->format('Y-m-d H:i:s'),
+                    'port_of_entry' => $visa->port_of_entry_used,
+                ], 422);
+            }
+
+            // Mark as consumed (for single-entry)
+            if ($visa->entry_type === 'single') {
+                $visa->update([
+                    'entry_consumed' => true,
+                    'entry_date' => now(),
+                    'port_of_entry_used' => $validated['port_of_entry'],
+                    'entry_officer_id' => $officer->id,
+                ]);
+            }
+
+            // Create border crossing record
+            $crossing = BorderCrossing::create([
+                'application_id' => $visa->id,
+                'crossing_type' => 'entry',
+                'port_of_entry' => $validated['port_of_entry'],
+                'passport_number_encrypted' => Crypt::encryptString($visa->passport_number),
+                'nationality' => $visa->nationality,
+                'traveler_name_encrypted' => Crypt::encryptString($visa->first_name . ' ' . $visa->last_name),
+                'verification_status' => 'valid',
+                'verification_notes' => $validated['notes'] ?? null,
+                'flight_number' => $validated['flight_number'] ?? null,
+                'airline' => $validated['airline'] ?? null,
+                'officer_id' => $officer->id,
+                'crossed_at' => now(),
+            ]);
+
+            Log::info('Visa entry confirmed', [
+                'visa_reference' => $visa->reference_number,
+                'entry_type' => $visa->entry_type,
+                'consumed' => $visa->entry_consumed,
+                'port' => $validated['port_of_entry'],
+                'officer_id' => $officer->id,
+                'crossing_id' => $crossing->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Entry confirmed successfully',
+                'document_type' => 'VISA',
+                'visa_reference' => $visa->reference_number,
+                'entry_type' => $visa->entry_type,
+                'entry_consumed' => $visa->entry_consumed,
+                'entry_date' => $visa->entry_date?->format('Y-m-d H:i:s'),
+                'port_of_entry' => $visa->port_of_entry_used,
+                'crossing_id' => $crossing->id,
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'error' => 'INVALID_DOCUMENT_TYPE',
+            'message' => 'Invalid document type',
+        ], 400);
     }
 }

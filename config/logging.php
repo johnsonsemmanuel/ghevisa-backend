@@ -118,6 +118,26 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // FIX #9: Dedicated audit log channel (immutable, 2-year retention)
+        'audit' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/audit.log'),
+            'level' => 'info',
+            'days' => 730, // 2 years retention for compliance
+            'permission' => 0640, // Read-only for group
+            'replace_placeholders' => true,
+        ],
+
+        // FIX #9: Security events channel (critical events, immediate alerting)
+        'security' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/security.log'),
+            'level' => 'warning',
+            'days' => 730, // 2 years retention
+            'permission' => 0640,
+            'replace_placeholders' => true,
+        ],
+
         'null' => [
             'driver' => 'monolog',
             'handler' => NullHandler::class,
@@ -151,6 +171,15 @@ return [
             'path' => storage_path('logs/document_access.log'),
             'level' => 'info',
             'days' => 365,
+            'replace_placeholders' => true,
+        ],
+
+        // SECURITY FIX MED-06: Payment transaction log
+        'payments' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/payments.log'),
+            'level' => 'info',
+            'days' => 730, // Retain payment logs for 2 years (compliance)
             'replace_placeholders' => true,
         ],
 

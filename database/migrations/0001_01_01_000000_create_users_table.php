@@ -16,7 +16,19 @@ return new class extends Migration
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->string('phone')->nullable();
-            $table->enum('role', ['applicant', 'gis_officer', 'mfa_reviewer', 'admin'])->default('applicant');
+            $table->enum('role', [
+                'applicant',
+                'gis_officer',
+                'gis_reviewer',
+                'gis_approver',
+                'gis_admin',
+                'mfa_reviewer',
+                'mfa_approver',
+                'mfa_admin',
+                'admin',
+                'airline_staff',
+                'border_officer'
+            ])->default('applicant');
             $table->string('agency')->nullable(); // GIS, MFA, ADMIN
             $table->boolean('is_active')->default(true);
             $table->string('locale', 5)->default('en');

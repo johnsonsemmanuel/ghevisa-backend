@@ -12,8 +12,8 @@ return new class extends Migration
             $table->string('merchant_ref', 20)->nullable()->after('id');
             $table->string('checkout_id')->nullable()->after('merchant_ref');
             $table->string('checkout_url', 500)->nullable()->after('checkout_id');
-            $table->string('bank_ref')->nullable()->after('transaction_id');
-            $table->string('payment_option')->nullable()->after('payment_method');
+            $table->string('bank_ref')->nullable()->after('transaction_reference');
+            $table->string('payment_option')->nullable()->after('payment_provider');
             $table->string('gateway')->default('gcb')->after('status');
             $table->json('gateway_response')->nullable()->after('gateway');
             $table->timestamp('completed_at')->nullable()->after('gateway_response');

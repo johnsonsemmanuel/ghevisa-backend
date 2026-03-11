@@ -62,26 +62,35 @@ class SecurityHeaders
             $this->buildCsp()
         );
 
-        // Strict Transport Security (HSTS) - only in production
+        // SECURITY FIX MED-01: Strict Transport Security (HSTS) - always enabled
+        // Use shorter max-age for non-production to allow easier testing
+        $maxAge = app()->environment('production') ? 31536000 : 86400; // 1 year vs 1 day
+        $hsts = "max-age={$maxAge}; includeSubDomains";
+        
+        // Only add preload directive in production (requires HTTPS cert and DNS setup)
         if (app()->environment('production')) {
-            $response->headers->set(
-                'Strict-Transport-Security',
-                'max-age=31536000; includeSubDomains; preload'
-            );
+            $hsts .= '; preload';
         }
+        
+        $response->headers->set('Strict-Transport-Security', $hsts);
 
         return $response;
     }
 
     /**
      * Build Content Security Policy header.
+     * SECURITY FIX HIGH-03: Removed unsafe-inline and unsafe-eval
      */
     protected function buildCsp(): string
     {
+        // Generate nonce for inline scripts/styles (if needed)
+        $nonce = base64_encode(random_bytes(16));
+        request()->attributes->set('csp_nonce', $nonce);
+        
         $directives = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Adjust for your frontend needs
-            "style-src 'self' 'unsafe-inline'",
+            "script-src 'self'", // SECURITY FIX: Removed 'unsafe-inline' 'unsafe-eval'
+            "style-src 'self'",  // SECURITY FIX: Removed 'unsafe-inline'
             "img-src 'self' data: https:",
             "font-src 'self' data:",
             "connect-src 'self' " . config('app.frontend_url', 'http://localhost:3000'),
@@ -89,6 +98,7 @@ class SecurityHeaders
             "form-action 'self'",
             "base-uri 'self'",
             "object-src 'none'",
+            "upgrade-insecure-requests", // Force HTTPS
         ];
 
         return implode('; ', $directives);

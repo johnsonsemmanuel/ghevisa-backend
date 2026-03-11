@@ -4,8 +4,10 @@ namespace App\Providers;
 
 use App\Observers\ApplicationDocumentObserver;
 use App\Observers\ApplicationObserver;
+use App\Observers\EtaApplicationObserver;
 use App\Models\Application;
 use App\Models\ApplicationDocument;
+use App\Models\EtaApplication;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -31,6 +33,7 @@ class EventServiceProvider extends ServiceProvider
         // Register observers
         Application::observe(ApplicationObserver::class);
         ApplicationDocument::observe(ApplicationDocumentObserver::class);
+        EtaApplication::observe(EtaApplicationObserver::class);
     }
 
     /**

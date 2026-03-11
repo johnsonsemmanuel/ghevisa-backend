@@ -15,6 +15,7 @@ class DocumentController extends Controller
         protected DocumentService $documentService,
         protected \App\Services\OcrService $ocrService,
         protected \App\Services\FileSecurityService $fileSecurityService,
+        protected \App\Services\VirusScanService $virusScanService, // SECURITY FIX HIGH-04
     ) {}
 
     /**
@@ -61,6 +62,23 @@ class DocumentController extends Controller
             ], 422);
         }
 
+        // SECURITY FIX HIGH-04: Virus scanning
+        $virusScanResult = $this->virusScanService->scan($file);
+        if (!$virusScanResult['clean']) {
+            \Log::channel('security')->alert('Malware detected in upload', [
+                'user_id' => $request->user()->id,
+                'application_id' => $application->id,
+                'filename' => $file->getClientOriginalName(),
+                'scan_result' => $virusScanResult['result'],
+                'ip_address' => $request->ip(),
+            ]);
+            
+            return response()->json([
+                'message' => 'File rejected: Security threat detected',
+                'errors' => ['file' => ['The uploaded file contains malicious content']],
+            ], 422);
+        }
+
         $errors = $this->documentService->validateFile($file);
         if (!empty($errors)) {
             return response()->json(['message' => 'Validation failed', 'errors' => $errors], 422);
@@ -97,6 +115,23 @@ class DocumentController extends Controller
             return response()->json([
                 'message' => 'File rejected by security scan',
                 'errors' => ['file' => $securityIssues],
+            ], 422);
+        }
+
+        // SECURITY FIX HIGH-04: Virus scanning for reuploads
+        $virusScanResult = $this->virusScanService->scan($request->file('file'));
+        if (!$virusScanResult['clean']) {
+            \Log::channel('security')->alert('Malware detected in reupload', [
+                'user_id' => $request->user()->id,
+                'document_id' => $document->id,
+                'filename' => $request->file('file')->getClientOriginalName(),
+                'scan_result' => $virusScanResult['result'],
+                'ip_address' => $request->ip(),
+            ]);
+            
+            return response()->json([
+                'message' => 'File rejected: Security threat detected',
+                'errors' => ['file' => ['The uploaded file contains malicious content']],
             ], 422);
         }
 

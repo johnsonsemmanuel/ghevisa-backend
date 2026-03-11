@@ -19,14 +19,139 @@ class GcbPaymentService
     {
         $this->baseUrl = config('services.gcb.base_url', 'https://epayuat.gcbltd.com:98/paymentgateway');
         $this->apiKey = config('services.gcb.api_key', '');
-        $this->testMode = config('services.gcb.test_mode', empty($this->apiKey));
+        
+        // CRITICAL SECURITY FIX: NEVER default to test mode in production
+        // Test mode allows FREE VISAS - this is a CRITICAL vulnerability
+        // 
+        // If API key is not configured in production, the system MUST FAIL LOUDLY
+        // rather than silently accepting fake payments.
+        //
+        // Real-world impact:
+        // - Applicants could get free visas
+        // - Government loses revenue
+        // - System abuse at national scale
+        // - Financial audit failures
+        // - National embarrassment
+        
+        if (config('app.env') === 'production') {
+            // Production MUST have API key configured
+            if (empty($this->apiKey)) {
+                Log::critical('GCB Payment Gateway: API key not configured in PRODUCTION', [
+                    'environment' => config('app.env'),
+                    'base_url' => $this->baseUrl,
+                ]);
+                
+                throw new \RuntimeException(
+                    'CRITICAL: GCB Payment Gateway API key not configured. ' .
+                    'Payment system is DISABLED to prevent free visas. ' .
+                    'Configure GCB_API_KEY in .env immediately.'
+                );
+            }
+            
+            // Production MUST NOT be in test mode
+            if (config('services.gcb.test_mode', false)) {
+                Log::critical('GCB Payment Gateway: Test mode enabled in PRODUCTION', [
+                    'environment' => config('app.env'),
+                ]);
+                
+                throw new \RuntimeException(
+                    'CRITICAL: GCB Payment Gateway test mode is enabled in PRODUCTION. ' .
+                    'This allows FREE VISAS. Set GCB_TEST_MODE=false immediately.'
+                );
+            }
+            
+            // In production, test mode is ALWAYS false
+            $this->testMode = false;
+            
+            Log::info('GCB Payment Gateway: Production mode active', [
+                'base_url' => $this->baseUrl,
+                'api_key_configured' => !empty($this->apiKey),
+            ]);
+        } else {
+            // Non-production: test mode only if explicitly enabled OR no API key
+            $this->testMode = config('services.gcb.test_mode', empty($this->apiKey));
+            
+            if ($this->testMode) {
+                Log::warning('GCB Payment Gateway: TEST MODE ACTIVE', [
+                    'environment' => config('app.env'),
+                    'reason' => empty($this->apiKey) ? 'No API key configured' : 'Explicitly enabled',
+                    'warning' => 'NO REAL PAYMENTS WILL BE PROCESSED',
+                ]);
+            }
+        }
     }
 
     /**
      * Initiate a checkout session with GCB Payment Gateway
+     * 
+     * CRITICAL SECURITY FIX: Idempotent payment initiation.
+     * 
+     * If payment already initiated with same idempotency key, returns existing payment.
+     * This prevents double charging when user clicks "Pay Now" multiple times.
+     * 
+     * @param Application $application
+     * @param string $callbackUrl
+     * @param string|null $idempotencyKey Optional idempotency key (generated if not provided)
+     * @return array
      */
-    public function initiateCheckout(Application $application, string $callbackUrl): array
+    public function initiateCheckout(Application $application, string $callbackUrl, ?string $idempotencyKey = null): array
     {
+        // Generate idempotency key if not provided
+        if (!$idempotencyKey) {
+            $idempotencyKey = Payment::generateIdempotencyKey($application->user_id, $application->id);
+        }
+
+        // CRITICAL: Check if payment already initiated with this idempotency key
+        $existingPayment = Payment::findByIdempotencyKey($idempotencyKey);
+        
+        if ($existingPayment) {
+            Log::info('Payment already initiated (idempotency)', [
+                'idempotency_key' => $idempotencyKey,
+                'payment_id' => $existingPayment->id,
+                'status' => $existingPayment->status,
+            ]);
+
+            // If payment is completed, return success
+            if ($existingPayment->status === 'completed') {
+                return [
+                    'success' => true,
+                    'checkout_url' => null,
+                    'checkout_id' => $existingPayment->checkout_id,
+                    'merchant_ref' => $existingPayment->merchant_ref,
+                    'payment_id' => $existingPayment->id,
+                    'already_completed' => true,
+                ];
+            }
+
+            // If payment is pending, return existing checkout URL
+            if ($existingPayment->status === 'pending' && $existingPayment->checkout_url) {
+                return [
+                    'success' => true,
+                    'checkout_url' => $existingPayment->checkout_url,
+                    'checkout_id' => $existingPayment->checkout_id,
+                    'merchant_ref' => $existingPayment->merchant_ref,
+                    'payment_id' => $existingPayment->id,
+                    'idempotent_return' => true,
+                ];
+            }
+
+            // If payment failed and can retry, allow new attempt
+            if ($existingPayment->status === 'failed' && $existingPayment->canRetry()) {
+                $existingPayment->incrementRetry();
+                Log::info('Retrying failed payment', [
+                    'payment_id' => $existingPayment->id,
+                    'retry_count' => $existingPayment->retry_count,
+                ]);
+                // Continue with new payment attempt
+            } else if ($existingPayment->status === 'failed') {
+                return [
+                    'success' => false,
+                    'error' => 'Payment failed and maximum retries exceeded. Please contact support.',
+                    'payment_id' => $existingPayment->id,
+                ];
+            }
+        }
+
         $merchantRef = $this->generateMerchantRef($application);
         $amount = (float) $application->total_fee;
 
@@ -51,9 +176,11 @@ class GcbPaymentService
 
             // DB-03: Use create instead of updateOrCreate to preserve payment history
             // PAY-05: Mark test payments distinctly
+            // CRITICAL: Add idempotency key
             $payment = Payment::create([
                 'application_id' => $application->id,
                 'user_id' => $application->user_id,
+                'idempotency_key' => $idempotencyKey,
                 'merchant_ref' => $merchantRef,
                 'checkout_id' => $checkoutId,
                 'checkout_url' => $mockCheckoutUrl,
@@ -112,9 +239,11 @@ class GcbPaymentService
                 }
 
                 // DB-03: Use create to preserve payment history
+                // CRITICAL: Add idempotency key
                 $payment = Payment::create([
                     'application_id' => $application->id,
                     'user_id' => $application->user_id,
+                    'idempotency_key' => $idempotencyKey,
                     'merchant_ref' => $merchantRef,
                     'checkout_id' => $data['checkOutId'] ?? null,
                     'checkout_url' => $data['checkOutUrl'] ?? null,

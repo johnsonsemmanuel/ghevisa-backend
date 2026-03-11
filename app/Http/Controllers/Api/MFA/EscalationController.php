@@ -76,7 +76,7 @@ class EscalationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = $this->mfaBaseQuery($request)
-            ->with(['visaType', 'assignedOfficer:id,first_name,last_name', 'riskAssessment']);
+            ->with(['visaType', 'assignedOfficer:id,first_name,last_name', 'riskAssessment', 'payment']);
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);
@@ -126,10 +126,18 @@ class EscalationController extends Controller
 
     /**
      * Get a single escalated case with full details.
+     * FIX #8: Added tier clearance verification.
      */
     public function show(Request $request, Application $application): JsonResponse
     {
         if ($denied = $this->ensureMissionAccess($request, $application)) return $denied;
+
+        // FIX #8: Tier clearance check
+        if (!$request->user()->hasTierClearance($application->tier ?? 1)) {
+            return response()->json([
+                'message' => 'You do not have clearance to view this tier ' . ($application->tier ?? 1) . ' application'
+            ], 403);
+        }
 
         $application->load([
             'visaType',
@@ -145,7 +153,12 @@ class EscalationController extends Controller
         ]);
 
         // SEC-04: Audit log data access
-        $application->logAccess('viewed_by_mfa_officer');
+        $application->logAccess('viewed_by_mfa_officer', [
+            'officer_id' => $request->user()->id,
+            'officer_name' => $request->user()->full_name,
+            'mission_id' => $request->user()->mfa_mission_id,
+            'tier' => $application->tier,
+        ]);
 
         return response()->json([
             'application'    => $application,
@@ -158,11 +171,15 @@ class EscalationController extends Controller
      * Submit application for approval (two-step process for MFA).
      * Reviewer submits, then Senior Approver approves.
      * Requires: applications.review permission
+     * FIX #8: Added tier clearance check.
      */
     public function submitForApproval(Request $request, Application $application): JsonResponse
     {
-        if (!$request->user()->canReviewApplications()) {
-            return response()->json(['message' => 'You do not have permission to submit for approval'], 403);
+        // FIX #8: Use new canReview() method with mission access
+        if (!$request->user()->canReview($application)) {
+            return response()->json([
+                'message' => 'You do not have permission to review this application. Check your mission assignment and tier clearance.'
+            ], 403);
         }
 
         $validated = $request->validate([
@@ -197,11 +214,15 @@ class EscalationController extends Controller
     /**
      * Approve an application (final approval).
      * Requires: applications.approve permission (Approval Officers only)
+     * FIX #8: Added tier clearance check.
      */
     public function approve(Request $request, Application $application): JsonResponse
     {
-        if (!$request->user()->canApproveApplications()) {
-            return response()->json(['message' => 'You do not have permission to approve applications'], 403);
+        // FIX #8: Use new canApprove() method with tier clearance + mission access
+        if (!$request->user()->canApprove($application)) {
+            return response()->json([
+                'message' => 'You do not have permission to approve this application. Check your mission assignment and tier clearance.'
+            ], 403);
         }
 
         $validated = $request->validate([
@@ -237,11 +258,15 @@ class EscalationController extends Controller
     /**
      * Deny an application.
      * Requires: applications.deny permission (Approval Officers only)
+     * FIX #8: Added tier clearance check.
      */
     public function deny(Request $request, Application $application): JsonResponse
     {
-        if (!$request->user()->canApproveApplications()) {
-            return response()->json(['message' => 'You do not have permission to deny applications'], 403);
+        // FIX #8: Use new canApprove() method with tier clearance + mission access
+        if (!$request->user()->canApprove($application)) {
+            return response()->json([
+                'message' => 'You do not have permission to deny this application. Check your mission assignment and tier clearance.'
+            ], 403);
         }
 
         $validated = $request->validate([

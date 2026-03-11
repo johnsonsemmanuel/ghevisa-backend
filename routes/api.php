@@ -75,6 +75,61 @@ Route::prefix('pricing')->middleware('throttle:60,1')->group(function () {
 // Public: unified travel authorization verification (for airlines / external systems)
 Route::get('/verify-travel', [VerificationController::class, 'verifyTravel'])->middleware('throttle:60,1');
 
+// Border officer entry confirmation (requires authentication)
+Route::post('/verify-travel/confirm-entry', [VerificationController::class, 'confirmEntry'])
+    ->middleware(['auth:sanctum', 'role:border_officer', 'throttle:60,1']);
+
+// Admin: Verification performance statistics
+Route::prefix('admin/verification-stats')->middleware(['auth:sanctum', 'role:admin'])->group(function () {
+    Route::get('/current-hour', [\App\Http\Controllers\Api\Admin\VerificationStatsController::class, 'currentHour']);
+    Route::get('/last-24-hours', [\App\Http\Controllers\Api\Admin\VerificationStatsController::class, 'last24Hours']);
+    Route::get('/dashboard', [\App\Http\Controllers\Api\Admin\VerificationStatsController::class, 'dashboard']);
+});
+
+// Admin: Advanced Analytics
+Route::prefix('admin/analytics')->middleware(['auth:sanctum', 'role:admin'])->group(function () {
+    Route::get('/predictive', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'predictive']);
+    Route::get('/anomalies', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'anomalies']);
+    Route::get('/trends', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'trends']);
+    Route::get('/capacity', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'capacity']);
+    Route::post('/clear-cache', [\App\Http\Controllers\Api\Admin\AnalyticsController::class, 'clearCache']);
+});
+
+// Admin: Alert Management
+Route::prefix('admin/alerts')->middleware(['auth:sanctum', 'role:admin'])->group(function () {
+    Route::get('/', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'store']);
+    Route::get('/config', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'config']);
+    Route::get('/logs', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'logs']);
+    Route::post('/process', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'process']);
+    Route::get('/{id}', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'show']);
+    Route::put('/{id}', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'update']);
+    Route::delete('/{id}', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'destroy']);
+    Route::post('/{id}/test', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'test']);
+    Route::post('/logs/{alertLogId}/acknowledge', [\App\Http\Controllers\Api\Admin\AlertsController::class, 'acknowledge']);
+});
+
+// Admin: Mission Management (MFA only)
+Route::prefix('admin/missions')->middleware(['auth:sanctum', 'role:mfa_admin,admin'])->group(function () {
+    Route::get('/', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'store']);
+    Route::get('/available-officers', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'getAvailableOfficers']);
+    Route::get('/{id}', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'show']);
+    Route::put('/{id}', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'update']);
+    Route::delete('/{id}', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'destroy']);
+    Route::get('/{id}/statistics', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'getStatistics']);
+    
+    // Country mappings
+    Route::get('/{id}/countries', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'getCountryMappings']);
+    Route::post('/{id}/countries', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'addCountryMapping']);
+    Route::delete('/{id}/countries/{mappingId}', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'removeCountryMapping']);
+    
+    // Officer assignments
+    Route::get('/{id}/officers', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'getOfficers']);
+    Route::post('/{id}/officers', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'assignOfficer']);
+    Route::delete('/{id}/officers/{userId}', [\App\Http\Controllers\Api\Admin\MissionManagementController::class, 'removeOfficer']);
+});
+
 // Public: test passport verification endpoint (to be replaced with real integration)
 Route::post('/passport/verify-test', [PassportVerificationController::class, 'simulate'])->middleware('throttle:30,1');
 
@@ -111,18 +166,38 @@ Route::prefix('eta')->group(function () {
 // SECURITY: All border endpoints require authentication
 Route::prefix('border')->middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::post('/verify', [\App\Http\Controllers\Api\BorderController::class, 'verify']);
+    Route::post('/verify-taid', [\App\Http\Controllers\Api\BorderController::class, 'verifyByTaid']);
     Route::post('/verify-qr', [\App\Http\Controllers\Api\BorderController::class, 'verifyQr']);
     Route::post('/quick-scan', [\App\Http\Controllers\Api\BorderController::class, 'quickScan']);
     Route::get('/ports', [\App\Http\Controllers\Api\BorderController::class, 'ports']);
 });
 
+// Aeropass Integration Routes (Basic Auth protected)
+Route::prefix('e-visa')->middleware('aeropass.auth')->group(function () {
+    Route::post('/interpol-nominal-verification/callback', [\App\Http\Controllers\Aeropass\InterpolController::class, 'callback']);
+    Route::post('/visa-check', [\App\Http\Controllers\Aeropass\EVisaController::class, 'visaCheck']);
+});
+
 // Authenticated Border Control routes
 Route::middleware(['auth:sanctum'])->prefix('border')->group(function () {
     Route::post('/crossing', [\App\Http\Controllers\Api\BorderController::class, 'recordCrossing']);
+    Route::post('/confirm-entry', [\App\Http\Controllers\Api\BorderController::class, 'confirmEntry']);
     Route::post('/verify-and-record', [\App\Http\Controllers\Api\BorderController::class, 'verifyAndRecordEntry']);
     Route::get('/offline-cache', [\App\Http\Controllers\Api\BorderController::class, 'offlineCache']);
     Route::get('/statistics', [\App\Http\Controllers\Api\BorderController::class, 'statistics']);
     Route::get('/recent', [\App\Http\Controllers\Api\BorderController::class, 'recentCrossings']);
+    
+    // Operations Dashboard
+    Route::get('/operations/stats', [\App\Http\Controllers\Api\Border\OperationsController::class, 'getStats']);
+    Route::get('/operations/activity', [\App\Http\Controllers\Api\Border\OperationsController::class, 'getRecentActivity']);
+    Route::get('/operations/ports', [\App\Http\Controllers\Api\Border\OperationsController::class, 'getPortActivity']);
+    
+    // Reports
+    Route::get('/reports/stats', [\App\Http\Controllers\Api\Border\ReportsController::class, 'getStats']);
+    Route::get('/reports/recent', [\App\Http\Controllers\Api\Border\ReportsController::class, 'getRecentReports']);
+    Route::post('/reports/generate', [\App\Http\Controllers\Api\Border\ReportsController::class, 'generateReport']);
+    Route::get('/reports/download/{reportId}', [\App\Http\Controllers\Api\Border\ReportsController::class, 'downloadReport']);
+    Route::post('/reports/export', [\App\Http\Controllers\Api\Border\ReportsController::class, 'exportData']);
     
     // Reporting endpoints for HQ
     Route::get('/reports/arrivals', [\App\Http\Controllers\Api\BorderController::class, 'arrivalsReport']);
@@ -145,23 +220,27 @@ Route::prefix('airline')->middleware(['auth:sanctum', \App\Http\Middleware\Ensur
 | Authenticated Routes
 |--------------------------------------------------------------------------
 */
-Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::class, \App\Http\Middleware\AuditAction::class, 'throttle:60,1'])->group(function () {
+Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::class, \App\Http\Middleware\AuditAction::class])->group(function () {
 
     // ── Auth & Profile ──────────────────────────────────────────────
-    Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
-    Route::put('/auth/password', [AuthController::class, 'changePassword']);
-    Route::post('/auth/logout', [AuthController::class, 'logout']);
-    Route::get('/auth/me', [AuthController::class, 'me']);
+    // SECURITY FIX HIGH-02: Stricter rate limiting for auth endpoints
+    Route::put('/auth/profile', [AuthController::class, 'updateProfile'])->middleware('throttle:10,1');
+    Route::put('/auth/password', [AuthController::class, 'changePassword'])->middleware('throttle:5,1');
+    Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('throttle:10,1');
+    Route::get('/auth/me', [AuthController::class, 'me'])->middleware('throttle:30,1');
+    
+    // SECURITY FIX HIGH-01: Token refresh endpoint
+    Route::post('/auth/refresh', [AuthController::class, 'refresh'])->middleware('throttle:10,1');
 
     // ── Payment Verification (accessible by any authenticated user) ──
-    Route::post('/payment/verify', [\App\Http\Controllers\Api\PaymentController::class, 'verify'])->middleware('throttle:60,1');
+    Route::post('/payment/verify', [\App\Http\Controllers\Api\PaymentController::class, 'verify'])->middleware('throttle:20,1');
 
     /*
     |----------------------------------------------------------------------
-    | Applicant Routes
+    | Applicant Routes - SECURITY FIX HIGH-02: Reduced from 60 to 30 req/min
     |----------------------------------------------------------------------
     */
-    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':applicant'])->prefix('applicant')->group(function () {
+    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':applicant', 'throttle:30,1'])->prefix('applicant')->group(function () {
 
         Route::get('/applications', [ApplicationController::class, 'index']);
         Route::post('/applications', [ApplicationController::class, 'store']);
@@ -175,13 +254,18 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         Route::get('/applications/{application}/status', [ApplicationController::class, 'status']);
         Route::get('/applications/{application}/evisa', [ApplicationController::class, 'downloadEvisa']);
 
-        // Documents
-        Route::post('/applications/{application}/documents', [DocumentController::class, 'upload']);
-        Route::post('/documents/{document}/reupload', [DocumentController::class, 'reupload']);
+        // ETA Applications (uses same field names as regular applications for consistency)
+        Route::post('/eta-applications', [\App\Http\Controllers\Api\Applicant\EtaApplicationController::class, 'store']);
+
+        // Documents - SECURITY FIX HIGH-04: Apply SecureFileUpload middleware
+        Route::post('/applications/{application}/documents', [DocumentController::class, 'upload'])
+            ->middleware(\App\Http\Middleware\SecureFileUpload::class);
+        Route::post('/documents/{document:uuid}/reupload', [DocumentController::class, 'reupload'])
+            ->middleware(\App\Http\Middleware\SecureFileUpload::class);
         Route::get('/applications/{application}/documents/check', [DocumentController::class, 'checkCompleteness']);
         Route::get('/applications/{application}/documents', [ApplicationController::class, 'documents']);
-        Route::get('/applications/{application}/documents/{document}/download', [ApplicationController::class, 'downloadDocument']);
-        Route::delete('/applications/{application}/documents/{document}', [ApplicationController::class, 'deleteDocument']);
+        Route::get('/applications/{application}/documents/{document:uuid}/download', [ApplicationController::class, 'downloadDocument']);
+        Route::delete('/applications/{application}/documents/{document:uuid}', [ApplicationController::class, 'deleteDocument']);
 
         // Payments
         Route::get('/payment-methods', [\App\Http\Controllers\Api\PaymentController::class, 'methods']);
@@ -217,10 +301,10 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
 
     /*
     |----------------------------------------------------------------------
-    | GIS Officer Routes
+    | GIS Officer Routes - SECURITY FIX HIGH-02: Reduced from 60 to 20 req/min
     |----------------------------------------------------------------------
     */
-    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':gis_officer,gis_admin,admin'])->prefix('gis')->group(function () {
+    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':gis_officer,gis_admin,admin', 'throttle:20,1'])->prefix('gis')->group(function () {
 
         Route::get('/metrics', [CaseController::class, 'metrics']);
         Route::get('/reason-codes', [CaseController::class, 'reasonCodes']);
@@ -230,8 +314,8 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         Route::post('/cases/{application}/escalate', [CaseController::class, 'escalate']);
         Route::post('/cases/{application}/notes', [CaseController::class, 'addNote']);
         Route::post('/cases/{application}/request-info', [CaseController::class, 'requestInfo']);
-        Route::post('/cases/{application}/documents/{document}/verify', [CaseController::class, 'verifyDocument']);
-        Route::get('/cases/{application}/documents/{document}/download', [CaseController::class, 'downloadDocument']);
+        Route::post('/cases/{application}/documents/{document:uuid}/verify', [CaseController::class, 'verifyDocument']);
+        Route::get('/cases/{application}/documents/{document:uuid}/download', [CaseController::class, 'downloadDocument']);
 
         // Two-step approval: reviewer submits for approval, then approver approves
         Route::post('/cases/{application}/submit-for-approval', [CaseController::class, 'submitForApproval']);
@@ -268,10 +352,10 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
 
     /*
     |----------------------------------------------------------------------
-    | MFA Reviewer Routes
+    | MFA Reviewer Routes - SECURITY FIX HIGH-02: Reduced from 60 to 20 req/min
     |----------------------------------------------------------------------
     */
-    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':mfa_officer,admin'])->prefix('mfa')->group(function () {
+    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':mfa_officer,admin', 'throttle:20,1'])->prefix('mfa')->group(function () {
 
         Route::get('/metrics', [EscalationController::class, 'metrics']);
         Route::get('/missions', [EscalationController::class, 'missions']);
@@ -282,7 +366,7 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         Route::post('/escalations/{application}/notes', [EscalationController::class, 'addNote']);
         Route::put('/escalations/{application}/notes/{note}', [EscalationController::class, 'updateNote']);
         Route::post('/escalations/{application}/request-info', [EscalationController::class, 'requestInfo']);
-        Route::get('/escalations/{application}/documents/{document}/download', [EscalationController::class, 'downloadDocument']);
+        Route::get('/escalations/{application}/documents/{document:uuid}/download', [EscalationController::class, 'downloadDocument']);
         Route::post('/escalations/{application}/submit-for-approval', [EscalationController::class, 'submitForApproval']);
         Route::post('/escalations/{application}/approve', [EscalationController::class, 'approve']);
         Route::post('/escalations/{application}/deny', [EscalationController::class, 'deny']);
@@ -303,10 +387,10 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
 
     /*
     |----------------------------------------------------------------------
-    | Admin Routes
+    | Admin Routes - SECURITY FIX HIGH-02: Reduced from 60 to 10 req/min
     |----------------------------------------------------------------------
     */
-    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':admin'])->prefix('admin')->group(function () {
+    Route::middleware([\App\Http\Middleware\EnsureRole::class . ':admin', 'throttle:10,1'])->prefix('admin')->group(function () {
 
         // Users
         Route::get('/users', [UserController::class, 'index']);
@@ -319,7 +403,7 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
         // Applications & Payments
         Route::get('/applications', [ReportController::class, 'applications']);
         Route::get('/applications/{application}', [ReportController::class, 'showApplication']);
-        Route::get('/applications/{application}/documents/{document}/download', [ReportController::class, 'downloadDocument']);
+        Route::get('/applications/{application}/documents/{document:uuid}/download', [ReportController::class, 'downloadDocument']);
         Route::get('/payments', [ReportController::class, 'payments']);
 
         // Tier configuration
@@ -397,10 +481,10 @@ Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::
 
     /*
     |--------------------------------------------------------------------------
-    | Risk Scoring Routes
+    | Risk Scoring Routes - SECURITY FIX HIGH-02: Reduced from 60 to 20 req/min
     |--------------------------------------------------------------------------
     */
-    Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::class, 'throttle:60,1'])->prefix('risk-scoring')->group(function () {
+    Route::middleware(['auth:sanctum', 'api.error', \App\Http\Middleware\SetLocale::class, 'throttle:20,1'])->prefix('risk-scoring')->group(function () {
         Route::get('/applications/{application}/calculate', [\App\Http\Controllers\Api\RiskScoringController::class, 'calculate']);
         Route::get('/applications/{application}', [\App\Http\Controllers\Api\RiskScoringController::class, 'show']);
         Route::post('/applications/{application}/rescore', [\App\Http\Controllers\Api\RiskScoringController::class, 'manualRescore']);

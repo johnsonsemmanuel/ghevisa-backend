@@ -31,6 +31,7 @@ class CaseController extends Controller
                 'reviewingOfficer:id,first_name,last_name',
                 'approvalOfficer:id,first_name,last_name',
                 'riskAssessment',
+                'payment',
             ]);
 
         if ($status = $request->query('status')) {
@@ -38,7 +39,26 @@ class CaseController extends Controller
         }
 
         if ($queue = $request->query('queue')) {
-            $query->where('current_queue', $queue);
+            // Mirror dashboard metrics logic so card counts match case lists
+            if ($queue === 'review_queue') {
+                $query->where(function ($q) {
+                    $q->where('current_queue', 'review_queue')
+                      ->orWhere(function ($q2) {
+                          $q2->whereNull('current_queue')
+                             ->whereIn('status', ['submitted', 'under_review', 'additional_info_requested']);
+                      });
+                });
+            } elseif ($queue === 'approval_queue') {
+                $query->where(function ($q) {
+                    $q->where('current_queue', 'approval_queue')
+                      ->orWhere(function ($q2) {
+                          $q2->whereNull('current_queue')
+                             ->where('status', 'pending_approval');
+                      });
+                });
+            } else {
+                $query->where('current_queue', $queue);
+            }
         }
 
         if ($tier = $request->query('tier')) {
@@ -87,12 +107,18 @@ class CaseController extends Controller
     /**
      * Get a single case for review with all details.
      * SECURITY: Verify application belongs to GIS queue.
+     * FIX #8: Added tier clearance verification.
      */
-    public function show(Application $application): JsonResponse
+    public function show(Request $request, Application $application): JsonResponse
     {
         // IDOR Protection: Ensure application is in GIS queue
         if ($application->assigned_agency !== 'gis') {
             abort(403, 'This application is not assigned to GIS');
+        }
+
+        // FIX #8: Tier clearance check - officers can only view applications within their clearance
+        if (!$request->user()->hasTierClearance($application->tier ?? 1)) {
+            abort(403, 'You do not have clearance to view this tier ' . ($application->tier ?? 1) . ' application');
         }
 
         $application->load([
@@ -109,7 +135,11 @@ class CaseController extends Controller
         ]);
 
         // SEC-04: Audit log data access
-        $application->logAccess('viewed_by_officer');
+        $application->logAccess('viewed_by_officer', [
+            'officer_id' => $request->user()->id,
+            'officer_name' => $request->user()->full_name,
+            'tier' => $application->tier,
+        ]);
 
         return response()->json([
             'application'     => $application,
@@ -321,11 +351,15 @@ class CaseController extends Controller
      * Submit application for approval (two-step process).
      * Reviewer submits, then Approver approves.
      * Requires: applications.review permission
+     * FIX #8: Added tier clearance check.
      */
     public function submitForApproval(Request $request, Application $application): JsonResponse
     {
-        if (!$request->user()->canReviewApplications()) {
-            return response()->json(['message' => 'You do not have permission to submit for approval'], 403);
+        // FIX #8: Use new canReview() method with tier clearance
+        if (!$request->user()->canReview($application)) {
+            return response()->json([
+                'message' => 'You do not have permission to review this application. Check your tier clearance.'
+            ], 403);
         }
 
         $validated = $request->validate([
@@ -362,11 +396,15 @@ class CaseController extends Controller
     /**
      * Approve an application (final approval).
      * Requires: applications.approve permission (Approval Officers only)
+     * FIX #8: Added tier clearance check.
      */
     public function approve(Request $request, Application $application): JsonResponse
     {
-        if (!$request->user()->canApproveApplications()) {
-            return response()->json(['message' => 'You do not have permission to approve applications'], 403);
+        // FIX #8: Use new canApprove() method with tier clearance + mission access
+        if (!$request->user()->canApprove($application)) {
+            return response()->json([
+                'message' => 'You do not have permission to approve this application. Check your tier clearance and agency assignment.'
+            ], 403);
         }
 
         $validated = $request->validate([
@@ -419,11 +457,15 @@ class CaseController extends Controller
     /**
      * Deny an application.
      * Requires: applications.deny permission (Approval Officers only)
+     * FIX #8: Added tier clearance check.
      */
     public function deny(Request $request, Application $application): JsonResponse
     {
-        if (!$request->user()->canApproveApplications()) {
-            return response()->json(['message' => 'You do not have permission to deny applications'], 403);
+        // FIX #8: Use new canApprove() method with tier clearance
+        if (!$request->user()->canApprove($application)) {
+            return response()->json([
+                'message' => 'You do not have permission to deny this application. Check your tier clearance and agency assignment.'
+            ], 403);
         }
 
         $validated = $request->validate([
@@ -627,6 +669,7 @@ class CaseController extends Controller
 
     /**
      * Batch approve applications.
+     * FIX #8: Added per-application authorization check.
      */
     public function batchApprove(Request $request): JsonResponse
     {
@@ -651,6 +694,15 @@ class CaseController extends Controller
 
         foreach ($applications as $application) {
             try {
+                // FIX #8: Check authorization for EACH application (tier clearance + mission access)
+                if (!$request->user()->canApprove($application)) {
+                    $errors[] = [
+                        'reference_number' => $application->reference_number,
+                        'error' => 'Insufficient clearance for tier ' . ($application->tier ?? 1) . ' application',
+                    ];
+                    continue;
+                }
+
                 $this->applicationService->changeStatus(
                     $application,
                     'approved',
@@ -660,6 +712,14 @@ class CaseController extends Controller
                 $application->update([
                     'decided_at' => now(),
                     'decision_notes' => $validated['notes'] ?? null,
+                    'approval_officer_id' => $request->user()->id,
+                ]);
+
+                // Explicit audit log for batch approval
+                $application->logAccess('batch_approved_by_officer', [
+                    'officer_id' => $request->user()->id,
+                    'officer_name' => $request->user()->full_name,
+                    'notes' => $validated['notes'] ?? 'Batch approval',
                 ]);
 
                 $approved++;

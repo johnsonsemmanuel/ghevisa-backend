@@ -85,6 +85,11 @@ class User extends Authenticatable
         return $this->belongsTo(MfaMission::class, 'mfa_mission_id');
     }
 
+    public function borderCrossings(): HasMany
+    {
+        return $this->hasMany(BorderCrossing::class, 'officer_id');
+    }
+
     public function notifications(): HasMany
     {
         return $this->hasMany(\Illuminate\Notifications\DatabaseNotification::class, 'notifiable_id')
@@ -166,6 +171,119 @@ class User extends Authenticatable
         }
 
         return false;
+    }
+
+    /**
+     * FIX #8: Check if user has clearance for application tier.
+     * SECURITY: Prevents junior officers from approving high-risk applications.
+     * 
+     * Tier Clearance Levels:
+     * - Tier 1 (Low Risk): All officers
+     * - Tier 2 (Medium Risk): Reviewers and above
+     * - Tier 3 (High Risk): Approvers only
+     * - Tier 4 (Critical Risk): Admins only
+     */
+    public function hasTierClearance(int|string|null $tier): bool
+    {
+        // Convert string tier to integer (e.g., "tier_1" -> 1)
+        if (is_string($tier)) {
+            $tier = (int) str_replace('tier_', '', $tier);
+        }
+        
+        // Default to tier 1 if null
+        if ($tier === null) {
+            $tier = 1;
+        }
+
+        // Admins have clearance for all tiers
+        if ($this->isAdmin() || $this->isGisAdmin() || $this->isMfaAdmin()) {
+            return true;
+        }
+
+        // Tier 4 (Critical): Admins only
+        if ($tier >= 4) {
+            return false;
+        }
+
+        // Tier 3 (High Risk): Approvers and above
+        if ($tier >= 3) {
+            return $this->canApproveApplications();
+        }
+
+        // Tier 2 (Medium Risk): Reviewers and above
+        if ($tier >= 2) {
+            return $this->canReviewApplications();
+        }
+
+        // Tier 1 (Low Risk): All officers
+        return $this->isGisOfficer() || $this->isMfaOfficer();
+    }
+
+    /**
+     * FIX #8: Check if user can approve a specific application.
+     * SECURITY: Combines permission check + tier clearance + mission access.
+     */
+    public function canApprove(Application $application): bool
+    {
+        // Must have approval permission
+        if (!$this->canApproveApplications()) {
+            return false;
+        }
+
+        // Must have tier clearance
+        if (!$this->hasTierClearance($application->tier ?? 1)) {
+            return false;
+        }
+
+        // MFA officers: Must have mission access
+        if ($this->isMfaOfficer() && $application->owner_mission_id) {
+            if (!$this->canAccessMission($application->owner_mission_id)) {
+                return false;
+            }
+        }
+
+        // GIS officers: Can only approve GIS applications
+        if ($this->isGisOfficer() && $application->assigned_agency !== 'gis') {
+            return false;
+        }
+
+        // MFA officers: Can only approve MFA applications
+        if ($this->isMfaOfficer() && $application->assigned_agency !== 'mfa') {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * FIX #8: Check if user can review a specific application.
+     * SECURITY: Combines permission check + mission access.
+     */
+    public function canReview(Application $application): bool
+    {
+        // Must have review permission
+        if (!$this->canReviewApplications()) {
+            return false;
+        }
+
+        // MFA officers: Must have mission access
+        if ($this->isMfaOfficer() && $application->owner_mission_id) {
+            if (!$this->canAccessMission($application->owner_mission_id)) {
+                return false;
+            }
+        }
+
+        // GIS officers: Can only review GIS applications
+        if ($this->isGisOfficer() && $application->assigned_agency !== 'gis') {
+            return false;
+        }
+
+        // MFA officers: Can only review MFA applications
+        if ($this->isMfaOfficer() && $application->assigned_agency !== 'mfa') {
+            return false;
+        }
+
+        return true;
     }
 
     public function getFullNameAttribute(): string

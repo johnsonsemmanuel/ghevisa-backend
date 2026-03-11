@@ -116,24 +116,40 @@ class GcbPaymentController extends Controller
 
     /**
      * GCB Callback endpoint (called by GCB gateway)
+     * SECURITY FIX: Always require signature verification
      */
     public function callback(Request $request): JsonResponse
     {
-        // CRIT-12: Verify GCB callback signature
+        // CRITICAL: Always verify GCB callback signature
         $signature = $request->header('X-GCB-Signature');
         $gcbSecret = config('services.gcb.callback_secret');
 
-        if ($gcbSecret) {
-            if (!$signature) {
-                Log::warning('GCB callback missing signature', ['ip' => $request->ip()]);
-                return response()->json(['error' => 'Missing signature'], 401);
-            }
+        // SECURITY FIX: Fail if secret not configured
+        if (!$gcbSecret) {
+            Log::critical('GCB callback secret not configured - payment system misconfigured', [
+                'ip' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+            abort(500, 'Payment system misconfigured');
+        }
 
-            $expectedSignature = hash_hmac('sha256', $request->getContent(), $gcbSecret);
-            if (!hash_equals($expectedSignature, $signature)) {
-                Log::warning('GCB callback invalid signature', ['ip' => $request->ip()]);
-                return response()->json(['error' => 'Invalid signature'], 401);
-            }
+        if (!$signature) {
+            Log::warning('GCB callback missing signature', [
+                'ip' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'payload' => $request->all(),
+            ]);
+            abort(401, 'Missing signature');
+        }
+
+        $expectedSignature = hash_hmac('sha256', $request->getContent(), $gcbSecret);
+        if (!hash_equals($expectedSignature, $signature)) {
+            Log::warning('GCB callback invalid signature', [
+                'ip' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'provided_signature' => $signature,
+            ]);
+            abort(401, 'Invalid signature');
         }
 
         Log::info('GCB Callback received', $request->all());

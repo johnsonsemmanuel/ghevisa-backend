@@ -62,6 +62,7 @@ class Application extends Model
 
     protected $fillable = [
         'reference_number',
+        'taid',
         'user_id',
         'visa_type_id',
         'visa_channel',
@@ -72,37 +73,75 @@ class Application extends Model
         'current_queue',
         'first_name_encrypted',
         'last_name_encrypted',
+        'other_names',
         'date_of_birth_encrypted',
         'passport_number_encrypted',
         'nationality_encrypted',
         'email_encrypted',
         'phone_encrypted',
+        'phone_country',
         'gender',
         'marital_status',
         'profession_encrypted',
+        'occupation',
         'country_of_birth',
+        'place_of_birth',
         'passport_issue_date',
+        'passport_issue_place',
         'passport_expiry',
         'passport_issuing_authority',
         'intended_arrival',
+        'return_date',
         'duration_days',
+        'visa_duration',
+        'place_of_embarkation',
         'eta_validity_days',
         'entry_type_granted',
         'address_in_ghana',
         'port_of_entry',
+        'destination_city',
         'airline',
         'flight_number',
         'host_name',
         'host_phone',
+        'host_address',
+        'host_relationship',
         'hotel_booking_reference',
+        'accommodation_type',
+        'accommodation_address',
+        'hotel_name',
         'purpose_of_visit',
+        'purpose_details',
+        'visited_ghana_before',
+        'previous_visa_number',
+        'visited_other_countries',
         'visited_country_1',
         'visited_country_2',
         'visited_country_3',
+        'high_risk_travel',
         'previous_ghana_visa',
         'entry_denied_before',
+        'overstayed_before',
+        'international_sanctions',
         'criminal_conviction',
         'travel_history',
+        'current_address',
+        'city',
+        'state_province',
+        'postal_code',
+        'country_of_residence',
+        'employer_name',
+        'employer_address',
+        'employer_phone',
+        'company_name',
+        'company_address',
+        'job_title',
+        'business_purpose',
+        'business_details',
+        'host_company_name',
+        'host_company_address',
+        'host_contact_name',
+        'host_contact_phone',
         'status',
         'tier',
         'assigned_agency',
@@ -134,6 +173,9 @@ class Application extends Model
         'health_yellow_fever_vaccinated',
         'health_chronic_conditions',
         'health_condition_details',
+        'health_infectious_travel',
+        'health_infectious_countries',
+        'health_issues',
         'owner_mission_id',
         'current_queue',
         'reviewing_officer_id',
@@ -145,12 +187,17 @@ class Application extends Model
         'passport_verification_status',
         'passport_verification_source',
         'passport_verification_at',
+        'entry_consumed',
+        'entry_date',
+        'port_of_entry_used',
+        'entry_officer_id',
     ];
 
     protected function casts(): array
     {
         return [
             'intended_arrival' => 'date',
+            'return_date' => 'date',
             'passport_issue_date' => 'date',
             'passport_expiry' => 'date',
             'submitted_at'     => 'datetime',
@@ -169,6 +216,8 @@ class Application extends Model
             'government_fee' => 'decimal:2',
             'platform_fee' => 'decimal:2',
             'processing_fee' => 'decimal:2',
+            'entry_consumed' => 'boolean',
+            'entry_date' => 'datetime',
         ];
     }
 
@@ -283,6 +332,11 @@ class Application extends Model
         return $this->belongsTo(MfaMission::class, 'owner_mission_id');
     }
 
+    public function entryOfficer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'entry_officer_id');
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(ApplicationDocument::class);
@@ -336,5 +390,59 @@ class Application extends Model
             return null;
         }
         return max(0, now()->diffInHours($this->sla_deadline, false));
+    }
+
+    /**
+     * CRITICAL SECURITY FIX: Determine if application can be auto-approved.
+     * 
+     * DISABLED UNTIL SYSTEM IS PROVEN SECURE:
+     * - Risk assessment logic is incomplete
+     * - OCR verification is not implemented
+     * - Watchlist matching needs strengthening
+     * 
+     * ALL APPLICATIONS REQUIRE MANUAL REVIEW BY TRAINED OFFICERS.
+     * 
+     * This is a GOVERNMENT IMMIGRATION SYSTEM. Lives and national security
+     * depend on proper vetting. We do NOT auto-approve until:
+     * 1. Risk assessment is fully implemented and tested
+     * 2. OCR service is integrated and validated
+     * 3. Watchlist matching is proven accurate
+     * 4. System has been penetration tested
+     * 5. Officers have been trained on the system
+     * 
+     * @return bool Always returns false (manual review required)
+     */
+    public function canBeAutoApproved(): bool
+    {
+        // NEVER auto-approve until system is proven secure
+        // This protects against:
+        // - Incomplete risk assessment (returns null/false)
+        // - Missing OCR verification (not implemented)
+        // - Weak watchlist matching (false negatives)
+        // - Forged documents (no real verification)
+        // - Terrorist entry (screening incomplete)
+        
+        return false; // TODO: Enable after full security audit and testing
+    }
+
+    /**
+     * Check if application requires manual review.
+     * 
+     * @return bool Always returns true (all applications need review)
+     */
+    public function requiresManualReview(): bool
+    {
+        // ALL applications require manual review
+        return true;
+    }
+
+    /**
+     * Get reason why auto-approval is disabled.
+     * 
+     * @return string Explanation for officers
+     */
+    public function getAutoApprovalDisabledReason(): string
+    {
+        return 'All applications require manual review for security. Auto-approval is disabled until risk assessment, OCR verification, and watchlist matching are fully implemented and tested.';
     }
 }

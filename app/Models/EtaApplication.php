@@ -13,6 +13,7 @@ class EtaApplication extends Model
 
     protected $fillable = [
         'reference_number',
+        'taid',
         'user_id',
         'first_name_encrypted',
         'last_name_encrypted',
@@ -50,9 +51,15 @@ class EtaApplication extends Model
         'payment_reference',
         'approved_at',
         'expires_at',
+        'valid_from',
+        'valid_until',
         'passport_verification_status',
         'passport_verification_source',
         'passport_verification_at',
+        'entry_consumed',
+        'entry_date',
+        'port_of_entry_used',
+        'entry_officer_id',
     ];
 
     protected function casts(): array
@@ -68,13 +75,22 @@ class EtaApplication extends Model
             'fee_amount' => 'decimal:2',
             'approved_at' => 'datetime',
             'expires_at' => 'datetime',
+            'valid_from' => 'datetime',
+            'valid_until' => 'datetime',
             'validity_days' => 'integer',
+            'entry_consumed' => 'boolean',
+            'entry_date' => 'datetime',
         ];
     }
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function entryOfficer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'entry_officer_id');
     }
 
     public function scopePending($query)
@@ -102,6 +118,24 @@ class EtaApplication extends Model
         return $this->payment_status === 'completed';
     }
 
+    public function isConsumed(): bool
+    {
+        return $this->entry_consumed === true;
+    }
+
+    public function canBeUsedForEntry(): bool
+    {
+        return $this->isApproved() 
+            && !$this->isExpired() 
+            && !$this->isConsumed()
+            && $this->entry_type === 'single';
+    }
+
+    public function isMultipleEntry(): bool
+    {
+        return $this->entry_type === 'multiple';
+    }
+
     /**
      * Generate unique ETA reference number
      */
@@ -115,10 +149,19 @@ class EtaApplication extends Model
 
     /**
      * Generate ETA number upon approval
+     * Format: GH-ETA-YYYYMMDD-XXXX (per specification)
      */
     public function generateEtaNumber(): string
     {
-        $this->eta_number = 'ETA' . date('Ymd') . str_pad($this->id, 6, '0', STR_PAD_LEFT);
+        $date = date('Ymd');
+        $random = strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 4));
+        $this->eta_number = "GH-ETA-{$date}-{$random}";
+        
+        // Set validity period (90 days from approval)
+        $this->valid_from = now();
+        $this->valid_until = now()->addDays(90);
+        $this->expires_at = $this->valid_until; // Keep expires_at for backward compatibility
+        
         $this->save();
         return $this->eta_number;
     }

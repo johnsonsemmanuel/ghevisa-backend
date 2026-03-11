@@ -75,7 +75,31 @@ class PaymentController extends Controller
         
         $result = $this->paymentService->verifyPayment($reference);
 
+        // SECURITY FIX MED-06: Enhanced payment failure logging
         if (!$result['success'] && !isset($result['payment'])) {
+            $payment = Payment::where('transaction_reference', $reference)->first();
+            
+            Log::channel('payments')->warning('Payment verification failed', [
+                'reference' => $reference,
+                'user_id' => $request->user()?->id,
+                'application_id' => $payment?->application_id,
+                'status' => $result['status'] ?? 'unknown',
+                'error' => $result['message'] ?? 'Unknown error',
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'attempt_count' => $this->getPaymentAttemptCount($payment?->application_id),
+            ]);
+
+            // Alert on suspicious patterns
+            if ($payment && $this->getPaymentAttemptCount($payment->application_id) > 3) {
+                Log::channel('security')->alert('Multiple payment failures detected', [
+                    'application_id' => $payment->application_id,
+                    'user_id' => $payment->user_id,
+                    'attempt_count' => $this->getPaymentAttemptCount($payment->application_id),
+                    'ip_address' => $request->ip(),
+                ]);
+            }
+
             return response()->json([
                 'success' => false,
                 'message' => 'Payment verification failed: ' . ($result['status'] ?? 'unknown'),
@@ -95,6 +119,20 @@ class PaymentController extends Controller
             'application_id' => $payment?->application_id,
             'reference_number' => $payment?->application?->reference_number,
         ]);
+    }
+
+    /**
+     * Get payment attempt count for an application
+     */
+    protected function getPaymentAttemptCount(?int $applicationId): int
+    {
+        if (!$applicationId) {
+            return 0;
+        }
+
+        return Payment::where('application_id', $applicationId)
+            ->where('status', '!=', 'completed')
+            ->count();
     }
 
     /**

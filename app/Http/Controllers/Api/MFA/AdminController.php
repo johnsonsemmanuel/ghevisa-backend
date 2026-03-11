@@ -136,7 +136,7 @@ class AdminController extends Controller
     public function applications(Request $request): JsonResponse
     {
         $query = $this->scopedApplications($request)
-            ->with(['visaType', 'user:id,first_name,last_name,email']);
+            ->with(['visaType', 'user:id,first_name,last_name,email', 'payment']);
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);

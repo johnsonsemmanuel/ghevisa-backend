@@ -17,6 +17,7 @@ class VisaTypeFactory extends Factory
             'description' => $this->faker->sentence(10),
             'base_fee' => 260.00,
             'max_duration_days' => $this->faker->numberBetween(30, 90),
+            'required_documents' => json_encode(['passport', 'photo', 'hotel_booking']),
             'is_active' => true,
         ];
     }
