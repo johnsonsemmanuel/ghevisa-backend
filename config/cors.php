@@ -7,7 +7,8 @@ return [
     'allowed_methods' => ['*'],
 
     'allowed_origins' => [
-        env('FRONTEND_URL', 'http://localhost:3000'),
+        env('FRONTEND_URL', 'https://evisaproject.vercel.app'),
+        'https://evisaproject.vercel.app',
         'http://localhost:3000',
         'http://localhost:3001',
         'http://127.0.0.1:3000',
