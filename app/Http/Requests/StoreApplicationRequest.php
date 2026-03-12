@@ -63,8 +63,8 @@ class StoreApplicationRequest extends BaseApiRequest
             'nationality' => [
                 'required',
                 'string',
-                'max:100',
-                'exists:countries,name'
+                'size:2',
+                'regex:/^[A-Z]{2}$/'
             ],
             'date_of_birth' => [
                 'required',
@@ -88,7 +88,7 @@ class StoreApplicationRequest extends BaseApiRequest
                 'required',
                 'string',
                 'max:100',
-                Rule::in(['Tourism', 'Business', 'Study', 'Medical', 'Transit', 'Diplomatic', 'Other'])
+                Rule::in(['tourism', 'business', 'family', 'transit', 'other'])
             ],
             'visa_channel' => [
                 'sometimes',
@@ -123,7 +123,7 @@ class StoreApplicationRequest extends BaseApiRequest
             'date_of_birth.after' => 'Date of birth cannot be more than 120 years ago.',
             'intended_arrival.after' => 'Intended arrival date must be after today.',
             'intended_arrival.before' => 'Intended arrival date cannot be more than 1 year from now.',
-            'nationality.exists' => 'The selected nationality is not valid.',
+            'nationality.regex' => 'Nationality must be a valid 2-letter country code.',
             'visa_type_id.exists' => 'The selected visa type is not available.',
         ]);
     }
