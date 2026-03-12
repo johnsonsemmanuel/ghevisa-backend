@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\UniqueActivePassport;
 use Illuminate\Validation\Rule;
 
 class StoreEVisaApplicationRequest extends BaseApiRequest
@@ -39,7 +40,7 @@ class StoreEVisaApplicationRequest extends BaseApiRequest
             'profession'     => ['required', 'string', 'max:255'],
             
             // Passport Information
-            'passport_number'=> ['required', 'string', 'min:6', 'max:50', 'regex:/^[A-Z0-9\s\-]+$/'],
+            'passport_number'=> ['required', 'string', 'min:6', 'max:50', 'regex:/^[A-Z0-9\s\-]+$/', new UniqueActivePassport()],
             'passport_issuing_authority' => ['nullable', 'string', 'max:255'],
             'passport_issue_date' => ['required', 'date', 'before_or_equal:today'],
             'passport_expiry'=> ['required', 'date', 'after:today'],

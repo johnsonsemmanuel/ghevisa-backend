@@ -191,6 +191,15 @@ class Application extends Model
         'entry_date',
         'port_of_entry_used',
         'entry_officer_id',
+        // Security check fields (added 2026-03-11)
+        'interpol_check_triggered_at',
+        'interpol_check_status',
+        'requires_manual_interpol_check',
+        'identity_verification_id',
+        'identity_verification_status',
+        'identity_verified_at',
+        'mrz_validated',
+        'mrz_data',
     ];
 
     protected function casts(): array
@@ -218,6 +227,12 @@ class Application extends Model
             'processing_fee' => 'decimal:2',
             'entry_consumed' => 'boolean',
             'entry_date' => 'datetime',
+            // Security check fields (added 2026-03-11)
+            'interpol_check_triggered_at' => 'datetime',
+            'requires_manual_interpol_check' => 'boolean',
+            'identity_verified_at' => 'datetime',
+            'mrz_validated' => 'boolean',
+            'mrz_data' => 'array',
         ];
     }
 

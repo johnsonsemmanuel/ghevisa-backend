@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services\RiskEvaluators;
+namespace App\Services\Risk\Evaluators;
 
 use App\Models\Application;
 use App\Models\Watchlist;

@@ -7,7 +7,7 @@ use App\Models\Application;
 use App\Models\VisaType;
 use App\Services\ApplicationService;
 use App\Services\EVisaPdfService;
-use App\Services\PaymentService;
+use App\Services\Payment\PaymentOrchestrator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,7 +15,7 @@ class ApplicationController extends Controller
 {
     public function __construct(
         protected ApplicationService $applicationService,
-        protected PaymentService $paymentService,
+        protected PaymentOrchestrator $paymentService,
     ) {}
 
     /**

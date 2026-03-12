@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\Payment;
 use App\Services\ApplicationService;
-use App\Services\MultiPaymentService;
+use App\Services\Payment\PaymentOrchestrator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
 class PaymentController extends Controller
 {
     public function __construct(
-        protected MultiPaymentService $paymentService,
+        protected PaymentOrchestrator $paymentService,
         protected ApplicationService $applicationService
     ) {}
 

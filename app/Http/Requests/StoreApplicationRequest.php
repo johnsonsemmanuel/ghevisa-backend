@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\UniqueActivePassport;
 use Illuminate\Validation\Rule;
 
 class StoreApplicationRequest extends BaseApiRequest
@@ -56,7 +57,8 @@ class StoreApplicationRequest extends BaseApiRequest
                 'string',
                 'min:6',
                 'max:20',
-                'regex:/^[A-Z0-9\s\-]+$/'
+                'regex:/^[A-Z0-9\s\-]+$/',
+                new UniqueActivePassport(), // SECURITY FIX: Prevent duplicate applications
             ],
             'nationality' => [
                 'required',

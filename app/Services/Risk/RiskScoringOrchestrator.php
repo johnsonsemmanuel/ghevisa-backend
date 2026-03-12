@@ -1,21 +1,23 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Risk;
 
 use App\Models\Application;
 use App\Models\ApplicationDocument;
 use App\Models\RiskAssessment;
+use App\Services\Risk\RuleBasedRiskEngine;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Risk Scoring Trigger Service
+ * Risk Scoring Orchestrator
  * 
- * Manages when and how risk scores are calculated and saved
+ * Manages when and how risk scores are calculated and saved.
+ * Triggers risk assessments based on application lifecycle events.
  */
-class RiskScoringTriggerService
+class RiskScoringOrchestrator
 {
     public function __construct(
-        protected RiskScoringService $riskScoringService
+        protected RuleBasedRiskEngine $riskEngine
     ) {}
 
     /**
@@ -61,46 +63,24 @@ class RiskScoringTriggerService
     protected function calculateAndSaveRiskScore(Application $application, string $trigger, array $context = []): array
     {
         try {
-            // Calculate risk score
-            $result = $this->riskScoringService->calculateRisk($application);
-
-            // Update or create risk assessment
-            $assessment = RiskAssessment::updateOrCreate(
-                ['application_id' => $application->id],
-                [
-                    'risk_score' => $result['risk_score'],
-                    'risk_level' => $result['risk_level'],
-                    'risk_reasons' => $result['risk_reasons'],
-                    'factors' => array_merge($result['triggered_rules'] ?? [], [
-                        'trigger' => $trigger,
-                        'trigger_context' => $context,
-                        'calculated_at' => now()->toISOString(),
-                    ]),
-                    'status' => $result['risk_level'] === 'critical' ? 'manual_review' : 'completed',
-                    'assessed_at' => now(),
-                    'risk_last_updated' => now(),
-                ]
-            );
-
-            // Update application with risk info (for quick access)
-            // Note: We don't store risk fields directly on applications anymore
-            // They are accessed via the riskAssessment relationship
+            // Calculate risk score using rule-based engine
+            $result = $this->riskEngine->assessRisk($application);
 
             Log::info("Risk score calculated and saved", [
                 'application_id' => $application->id,
                 'reference_number' => $application->reference_number,
                 'trigger' => $trigger,
-                'risk_score' => $result['risk_score'],
-                'risk_level' => $result['risk_level'],
-                'assessment_id' => $assessment->id,
+                'risk_score' => $result['score'],
+                'risk_level' => $result['level'],
+                'assessment_id' => $result['assessment_id'],
             ]);
 
             return [
                 'success' => true,
-                'risk_score' => $result['risk_score'],
-                'risk_level' => $result['risk_level'],
+                'risk_score' => $result['score'],
+                'risk_level' => $result['level'],
                 'risk_reasons' => $result['risk_reasons'],
-                'assessment_id' => $assessment->id,
+                'assessment_id' => $result['assessment_id'],
                 'trigger' => $trigger,
             ];
 
@@ -191,6 +171,109 @@ class RiskScoringTriggerService
         }
 
         Log::info("Batch risk scoring completed", $results);
+
+        return $results;
+    }
+
+    /**
+     * Mark an application as cleared after manual screening.
+     */
+    public function markCleared(Application $application, string $notes = null): Application
+    {
+        $application->update([
+            'risk_screening_status' => 'cleared',
+            'risk_screening_notes' => $notes ?? 'Manual screening completed. No flags.',
+        ]);
+
+        Log::info("Application {$application->reference_number} cleared risk screening");
+
+        return $application;
+    }
+
+    /**
+     * Mark an application as flagged during screening.
+     */
+    public function markFlagged(Application $application, string $reason): Application
+    {
+        $application->update([
+            'risk_screening_status' => 'flagged',
+            'risk_screening_notes' => $reason,
+        ]);
+
+        Log::warning("Application {$application->reference_number} flagged: {$reason}");
+
+        return $application;
+    }
+
+    /**
+     * Get applications pending risk screening.
+     */
+    public function getPendingScreening(int $limit = 50)
+    {
+        return Application::where('risk_screening_status', 'pending')
+            ->whereIn('status', ['under_review', 'escalated'])
+            ->orderBy('submitted_at', 'asc')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Get applications flagged for manual review.
+     */
+    public function getFlaggedApplications()
+    {
+        return Application::where('risk_screening_status', 'flagged')
+            ->whereNotIn('status', ['approved', 'denied', 'cancelled'])
+            ->orderBy('submitted_at', 'asc')
+            ->get();
+    }
+
+    /**
+     * Check if an application can be approved based on screening status.
+     */
+    public function canApprove(Application $application): bool
+    {
+        return !in_array($application->risk_screening_status, ['flagged']);
+    }
+
+    /**
+     * Get screening statistics for admin dashboard.
+     */
+    public function getStatistics(): array
+    {
+        return [
+            'pending' => Application::where('risk_screening_status', 'pending')
+                ->whereNotIn('status', ['approved', 'denied', 'cancelled'])->count(),
+            'cleared' => Application::where('risk_screening_status', 'cleared')->count(),
+            'flagged' => Application::where('risk_screening_status', 'flagged')
+                ->whereNotIn('status', ['denied'])->count(),
+            'in_progress' => Application::where('risk_screening_status', 'in_progress')->count(),
+        ];
+    }
+
+    /**
+     * Batch process pending applications for risk screening.
+     */
+    public function batchProcessPending(int $limit = 50): array
+    {
+        $applications = $this->getPendingScreening($limit);
+        $results = ['processed' => 0, 'flagged' => 0, 'cleared' => 0, 'errors' => 0];
+
+        foreach ($applications as $application) {
+            try {
+                $result = $this->riskEngine->assessRisk($application);
+                $results['processed']++;
+                
+                if ($result['level'] === 'critical' || ($application->watchlist_flagged ?? false)) {
+                    $results['flagged']++;
+                } else {
+                    $results['cleared']++;
+                }
+            } catch (\Exception $e) {
+                Log::error("Risk assessment failed for {$application->reference_number}: {$e->getMessage()}");
+                $results['errors']++;
+            }
+        }
 
         return $results;
     }

@@ -1,14 +1,15 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Payment\Providers;
 
 use App\Models\Application;
 use App\Models\Payment;
+use App\Services\Payment\Contracts\PaymentProviderInterface;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
-class PaystackService
+class PaystackProvider implements PaymentProviderInterface
 {
     protected string $baseUrl = 'https://api.paystack.co';
     protected string $secretKey;
@@ -292,5 +293,60 @@ class PaystackService
         }
 
         return [];
+    }
+}
+
+    /**
+     * Get provider name.
+     */
+    public function getName(): string
+    {
+        return 'paystack';
+    }
+
+    /**
+     * Check if provider is available for given country.
+     */
+    public function isAvailableForCountry(string $countryCode): bool
+    {
+        // Paystack is available in Ghana, Nigeria, South Africa, and Kenya
+        return in_array(strtoupper($countryCode), ['GH', 'NG', 'ZA', 'KE']);
+    }
+
+    /**
+     * Initialize a payment transaction (interface method).
+     */
+    public function initializePayment(
+        Application $application,
+        float $amount,
+        string $currency,
+        string $callbackUrl
+    ): array {
+        // Use existing initializeTransaction method
+        return $this->initializeTransaction($application, $callbackUrl);
+    }
+
+    /**
+     * Handle webhook callback from provider (interface method).
+     */
+    public function handleWebhook(array $payload): array
+    {
+        // Use existing verifyWebhook method
+        $reference = $payload['data']['reference'] ?? null;
+        
+        if (!$reference) {
+            return [
+                'success' => false,
+                'message' => 'Missing reference in webhook payload',
+            ];
+        }
+
+        $result = $this->verifyPayment($reference);
+        
+        return [
+            'success' => $result['success'] ?? false,
+            'reference' => $reference,
+            'status' => $result['status'] ?? 'unknown',
+        ];
     }
 }

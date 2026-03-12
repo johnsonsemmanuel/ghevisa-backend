@@ -1,14 +1,14 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Risk;
 
 use App\Models\Application;
 use App\Models\RiskAssessment;
-use App\Services\RiskEvaluators\IdentityRiskEvaluator;
-use App\Services\RiskEvaluators\TravelPatternEvaluator;
-use App\Services\RiskEvaluators\FinancialRiskEvaluator;
-use App\Services\RiskEvaluators\ImmigrationHistoryEvaluator;
-use App\Services\RiskEvaluators\DocumentQualityEvaluator;
+use App\Services\Risk\Evaluators\IdentityRiskEvaluator;
+use App\Services\Risk\Evaluators\TravelPatternEvaluator;
+use App\Services\Risk\Evaluators\FinancialRiskEvaluator;
+use App\Services\Risk\Evaluators\ImmigrationHistoryEvaluator;
+use App\Services\Risk\Evaluators\DocumentQualityEvaluator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Log;
  * Evaluates applications across five risk categories and provides clear explanations
  * for all risk scores.
  */
-class RuleBasedRiskEngineService
+class RuleBasedRiskEngine
 {
     protected IdentityRiskEvaluator $identityEvaluator;
     protected TravelPatternEvaluator $travelEvaluator;

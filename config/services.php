@@ -104,4 +104,33 @@ return [
         'GBP' => (float) env('EXCHANGE_RATE_GBP', 0.79),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | reCAPTCHA Configuration (SECURITY FIX)
+    |--------------------------------------------------------------------------
+    */
+
+    'recaptcha' => [
+        'site_key' => env('RECAPTCHA_SITE_KEY', ''),
+        'secret_key' => env('RECAPTCHA_SECRET_KEY', ''),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Identity Verification (SECURITY FIX - Infrastructure Ready)
+    |--------------------------------------------------------------------------
+    */
+
+    'sumsub' => [
+        'app_token' => env('SUMSUB_APP_TOKEN', ''),
+        'secret_key' => env('SUMSUB_SECRET_KEY', ''),
+        'base_url' => env('SUMSUB_BASE_URL', 'https://api.sumsub.com'),
+    ],
+
+    'onfido' => [
+        'api_token' => env('ONFIDO_API_TOKEN', ''),
+        'region' => env('ONFIDO_REGION', 'eu'),
+        'webhook_token' => env('ONFIDO_WEBHOOK_TOKEN', ''),
+    ],
+
 ];

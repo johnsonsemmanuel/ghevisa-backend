@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Applicant;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\VisaType;
+use App\Rules\UniqueActivePassport;
 use App\Services\ApplicationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -39,7 +40,7 @@ class EtaApplicationController extends Controller
             'profession'     => 'required|string|max:255',
             
             // Passport Information
-            'passport_number'=> 'required|string|max:50',
+            'passport_number'=> ['required', 'string', 'max:50', new UniqueActivePassport()],
             'passport_issuing_authority' => 'nullable|string|max:255',
             'passport_issue_date' => 'required|date|before_or_equal:today',
             'passport_expiry'=> 'required|date|after:today',

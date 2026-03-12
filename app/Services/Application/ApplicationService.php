@@ -256,12 +256,63 @@ class ApplicationService
             $this->routingService->route($application);
             $this->recordStatusChange($application, 'submitted', $application->status, "Routed to {$application->assigned_agency} as {$application->tier}");
 
+            // SECURITY FIX: Trigger Interpol check automatically (non-blocking)
+            $this->triggerInterpolCheckAsync($application);
+
             // Send notifications
             SendNotification::dispatch($application, 'application_submitted');
             SendNotification::dispatch($application, 'new_application_assigned');
 
             return $application;
         });
+    }
+
+    /**
+     * SECURITY FIX: Trigger Interpol check asynchronously.
+     * Non-blocking - if it fails, application continues but is flagged for manual review.
+     */
+    protected function triggerInterpolCheckAsync(Application $application): void
+    {
+        // Only trigger if enabled in config
+        if (!config('security.interpol.auto_trigger', true)) {
+            return;
+        }
+
+        try {
+            $aeropassService = app(AeropassService::class);
+            
+            $result = $aeropassService->triggerInterpolCheck([
+                'uniqueReferenceId' => $application->reference_number,
+                'firstName' => $application->first_name,
+                'surname' => $application->last_name,
+                'dateOfBirth' => $application->date_of_birth ? $application->date_of_birth->format('d/m/Y') : null,
+                'nationality' => $application->nationality,
+                'travelDocNumber' => $application->passport_number,
+            ]);
+            
+            // Store check reference
+            $application->update([
+                'interpol_check_triggered_at' => now(),
+                'interpol_check_status' => 'pending',
+            ]);
+            
+            \Log::info('Interpol check triggered successfully', [
+                'application_id' => $application->id,
+                'reference' => $application->reference_number,
+            ]);
+            
+        } catch (\Exception $e) {
+            // If Interpol service is down, flag for manual review but don't block application
+            \Log::error('Interpol check failed - flagged for manual review', [
+                'application_id' => $application->id,
+                'error' => $e->getMessage(),
+            ]);
+            
+            $application->update([
+                'interpol_check_status' => 'failed',
+                'requires_manual_interpol_check' => true,
+            ]);
+        }
     }
 
     /**

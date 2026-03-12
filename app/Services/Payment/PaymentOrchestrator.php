@@ -1,14 +1,23 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Payment;
 
 use App\Models\Application;
 use App\Models\Payment;
+use App\Services\Payment\Providers\PaystackProvider;
+use App\Services\Payment\Providers\GcbProvider;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
-class MultiPaymentService
+/**
+ * Payment Orchestrator
+ * 
+ * Manages payment processing across multiple payment providers.
+ * Routes payment requests to appropriate providers based on method and country.
+ */
+class PaymentOrchestrator
 {
     protected array $providers = ['paystack', 'stripe', 'mobile_money', 'bank_transfer'];
 
@@ -262,7 +271,7 @@ class MultiPaymentService
         ?string $callbackUrl
     ): array {
         try {
-            $gcbService = app(\App\Services\GcbPaymentService::class);
+            $gcbService = app(\App\Services\Payment\Providers\GcbProvider::class);
             $result = $gcbService->initiateCheckout($application, $callbackUrl ?? config('app.frontend_url') . '/payment/callback');
 
             if ($result['success']) {

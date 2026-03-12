@@ -5,14 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\RiskAssessment;
-use App\Services\RiskScoringService;
+use App\Services\Risk\RuleBasedRiskEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class RiskScoringController extends Controller
 {
     public function __construct(
-        protected RiskScoringService $riskScoringService
+        protected RuleBasedRiskEngine $riskEngine
     ) {}
 
     /**
@@ -20,35 +20,18 @@ class RiskScoringController extends Controller
      */
     public function calculate(Application $application): JsonResponse
     {
-        $result = $this->riskScoringService->calculateRisk($application);
-
-        // Update or create risk assessment
-        $assessment = RiskAssessment::updateOrCreate(
-            ['application_id' => $application->id],
-            [
-                'risk_score' => $result['risk_score'],
-                'risk_level' => $result['risk_level'],
-                'risk_reasons' => $result['risk_reasons'],
-                'factors' => [
-                    'triggered_rules' => $result['triggered_rules'],
-                    'total_rules_checked' => count($this->riskScoringService->rules),
-                ],
-                'status' => $result['risk_level'] === 'critical' ? 'manual_review' : 'completed',
-                'assessed_at' => now(),
-                'risk_last_updated' => now(),
-            ]
-        );
+        $result = $this->riskEngine->assessRisk($application);
 
         return response()->json([
             'success' => true,
             'data' => [
                 'application_id' => $application->id,
                 'reference_number' => $application->reference_number,
-                'risk_score' => $result['risk_score'],
-                'risk_level' => $result['risk_level'],
+                'risk_score' => $result['score'],
+                'risk_level' => $result['level'],
                 'risk_reasons' => $result['risk_reasons'],
-                'triggered_rules_count' => count($result['triggered_rules']),
-                'assessment_id' => $assessment->id,
+                'triggered_rules_count' => count($result['risk_reasons']),
+                'assessment_id' => $result['assessment_id'],
             ]
         ]);
     }
@@ -70,30 +53,13 @@ class RiskScoringController extends Controller
         foreach ($request->application_ids as $applicationId) {
             try {
                 $application = Application::findOrFail($applicationId);
-                $result = $this->riskScoringService->calculateRisk($application);
-
-                // Update risk assessment
-                RiskAssessment::updateOrCreate(
-                    ['application_id' => $application->id],
-                    [
-                        'risk_score' => $result['risk_score'],
-                        'risk_level' => $result['risk_level'],
-                        'risk_reasons' => $result['risk_reasons'],
-                        'factors' => [
-                            'triggered_rules' => $result['triggered_rules'],
-                            'total_rules_checked' => count($this->riskScoringService->rules),
-                        ],
-                        'status' => $result['risk_level'] === 'critical' ? 'manual_review' : 'completed',
-                        'assessed_at' => now(),
-                        'risk_last_updated' => now(),
-                    ]
-                );
+                $result = $this->riskEngine->assessRisk($application);
 
                 $results[] = [
                     'application_id' => $application->id,
                     'reference_number' => $application->reference_number,
-                    'risk_score' => $result['risk_score'],
-                    'risk_level' => $result['risk_level'],
+                    'risk_score' => $result['score'],
+                    'risk_level' => $result['level'],
                     'success' => true,
                 ];
                 $processed++;
@@ -194,41 +160,17 @@ class RiskScoringController extends Controller
             'reason' => 'nullable|string|max:500',
         ]);
 
-        $result = $this->riskScoringService->calculateRisk($application);
-
-        // Update risk assessment
-        $assessment = RiskAssessment::updateOrCreate(
-            ['application_id' => $application->id],
-            [
-                'risk_score' => $result['risk_score'],
-                'risk_level' => $result['risk_level'],
-                'risk_reasons' => $result['risk_reasons'],
-                'factors' => [
-                    'triggered_rules' => $result['triggered_rules'],
-                    'total_rules_checked' => count($this->riskScoringService->rules),
-                    'trigger' => 'manual_request',
-                    'trigger_context' => [
-                        'reason' => $request->reason,
-                        'requested_by' => auth()->user()?->id,
-                        'requested_at' => now()->toISOString(),
-                    ],
-                ],
-                'status' => $result['risk_level'] === 'critical' ? 'manual_review' : 'completed',
-                'assessed_by_id' => auth()->id(),
-                'assessed_at' => now(),
-                'risk_last_updated' => now(),
-            ]
-        );
+        $result = $this->riskEngine->assessRisk($application);
 
         return response()->json([
             'success' => true,
             'data' => [
                 'application_id' => $application->id,
                 'reference_number' => $application->reference_number,
-                'risk_score' => $result['risk_score'],
-                'risk_level' => $result['risk_level'],
+                'risk_score' => $result['score'],
+                'risk_level' => $result['level'],
                 'risk_reasons' => $result['risk_reasons'],
-                'assessment_id' => $assessment->id,
+                'assessment_id' => $result['assessment_id'],
                 'trigger' => 'manual_request',
             ]
         ]);

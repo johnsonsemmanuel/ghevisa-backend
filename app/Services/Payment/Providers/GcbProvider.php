@@ -1,14 +1,15 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Payment\Providers;
 
 use App\Models\Application;
 use App\Models\Payment;
+use App\Services\Payment\Contracts\PaymentProviderInterface;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
-class GcbPaymentService
+class GcbProvider implements PaymentProviderInterface
 {
     protected string $baseUrl;
     protected string $apiKey;
@@ -442,5 +443,51 @@ class GcbPaymentService
             '05' => 'Internal Error',
             default => 'Unknown Status',
         };
+    }
+}
+
+    /**
+     * Get provider name.
+     */
+    public function getName(): string
+    {
+        return 'gcb';
+    }
+
+    /**
+     * Check if provider is available for given country.
+     */
+    public function isAvailableForCountry(string $countryCode): bool
+    {
+        // GCB is only available in Ghana
+        return strtoupper($countryCode) === 'GH';
+    }
+
+    /**
+     * Initialize a payment transaction (interface method).
+     */
+    public function initializePayment(
+        Application $application,
+        float $amount,
+        string $currency,
+        string $callbackUrl
+    ): array {
+        // Use existing initiateCheckout method
+        return $this->initiateCheckout($application, $callbackUrl);
+    }
+
+    /**
+     * Handle webhook callback from provider (interface method).
+     */
+    public function handleWebhook(array $payload): array
+    {
+        // GCB uses polling instead of webhooks
+        // Return success to acknowledge receipt
+        return [
+            'success' => true,
+            'reference' => $payload['reference'] ?? '',
+            'status' => 'pending',
+            'message' => 'GCB uses polling for status updates',
+        ];
     }
 }

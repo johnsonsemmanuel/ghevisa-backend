@@ -48,6 +48,122 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Interpol Integration Configuration
+    |--------------------------------------------------------------------------
+    |
+    | SECURITY FIX: Automated Interpol checks for all applications
+    |
+    */
+
+    'interpol' => [
+        // Auto-trigger Interpol checks on application submission
+        'auto_trigger' => env('INTERPOL_AUTO_TRIGGER', true),
+        
+        // Block application if Interpol check fails (false = flag for manual review)
+        'block_on_failure' => env('INTERPOL_BLOCK_ON_FAILURE', false),
+        
+        // Retry failed checks
+        'retry_failed' => env('INTERPOL_RETRY_FAILED', true),
+        'retry_attempts' => env('INTERPOL_RETRY_ATTEMPTS', 3),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Duplicate Detection Configuration
+    |--------------------------------------------------------------------------
+    |
+    | SECURITY FIX: Prevent multiple applications with same passport
+    |
+    */
+
+    'duplicate_detection' => [
+        // Enable duplicate passport detection
+        'enabled' => env('DUPLICATE_DETECTION_ENABLED', true),
+        
+        // Statuses that count as "active" for duplicate detection
+        'active_statuses' => [
+            'draft',
+            'submitted',
+            'submitted_awaiting_payment',
+            'pending_payment',
+            'paid_submitted',
+            'under_review',
+            'pending_approval',
+            'approved',
+            'issued',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Bot Protection Configuration
+    |--------------------------------------------------------------------------
+    |
+    | SECURITY FIX: reCAPTCHA integration
+    |
+    */
+
+    'recaptcha' => [
+        // Enable reCAPTCHA
+        'enabled' => env('RECAPTCHA_ENABLED', config('app.env') === 'production'),
+        
+        // reCAPTCHA v3 score threshold (0.0 to 1.0, higher = more human-like)
+        'score_threshold' => env('RECAPTCHA_SCORE_THRESHOLD', 0.5),
+        
+        // Endpoints that require reCAPTCHA
+        'protected_endpoints' => [
+            'register',
+            'login',
+            'application.store',
+            'payment.initialize',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Identity Verification Configuration
+    |--------------------------------------------------------------------------
+    |
+    | SECURITY FIX: SumSub/Onfido integration (infrastructure ready)
+    |
+    */
+
+    'identity_verification' => [
+        // Enable identity verification (requires provider setup)
+        'enabled' => env('IDENTITY_VERIFICATION_ENABLED', false),
+        
+        // Provider: sumsub, onfido, or custom
+        'provider' => env('IDENTITY_VERIFICATION_PROVIDER', 'sumsub'),
+        
+        // Block application if verification fails
+        'block_on_failure' => env('IDENTITY_VERIFICATION_BLOCK', true),
+        
+        // Verification level: basic, standard, enhanced
+        'verification_level' => env('IDENTITY_VERIFICATION_LEVEL', 'standard'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | MRZ Validation Configuration
+    |--------------------------------------------------------------------------
+    |
+    | SECURITY FIX: Machine Readable Zone validation
+    |
+    */
+
+    'mrz_validation' => [
+        // Enable MRZ validation
+        'enabled' => env('MRZ_VALIDATION_ENABLED', false),
+        
+        // Require MRZ validation for approval
+        'required_for_approval' => env('MRZ_REQUIRED_FOR_APPROVAL', false),
+        
+        // Strict mode: reject if MRZ doesn't match application data
+        'strict_mode' => env('MRZ_STRICT_MODE', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | File Upload Security
     |--------------------------------------------------------------------------
     */

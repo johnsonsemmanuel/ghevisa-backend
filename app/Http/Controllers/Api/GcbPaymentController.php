@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\Payment;
 use App\Services\ApplicationService;
-use App\Services\GcbPaymentService;
+use App\Services\Payment\Providers\GcbProvider;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
 class GcbPaymentController extends Controller
 {
     public function __construct(
-        protected GcbPaymentService $gcbService,
+        protected GcbProvider $gcbService,
         protected ApplicationService $applicationService,
     ) {}
 
@@ -108,7 +108,7 @@ class GcbPaymentController extends Controller
             'success' => true,
             'status' => $payment->fresh()->status,
             'status_code' => $result['status_code'] ?? null,
-            'status_description' => GcbPaymentService::getStatusDescription($result['status_code'] ?? ''),
+            'status_description' => GcbProvider::getStatusDescription($result['status_code'] ?? ''),
             'payment_option' => $result['payment_option'] ?? null,
             'application_status' => $payment->application->status,
         ]);

@@ -6,13 +6,14 @@ use App\Models\Application;
 use App\Models\MfaMission;
 use App\Models\MissionCountryMapping;
 use App\Models\TierRule;
+use App\Services\Risk\RuleBasedRiskEngine;
 
 class ApplicationRoutingService
 {
     public function __construct(
         protected TierClassificationService $tierService,
         protected SlaService $slaService,
-        protected RiskScreeningService $riskScreeningService,
+        protected RuleBasedRiskEngine $riskEngine,
     ) {}
 
     /**
@@ -59,7 +60,7 @@ class ApplicationRoutingService
 
         // Perform risk assessment immediately
         try {
-            $this->riskScreeningService->performRiskAssessment($application);
+            $this->riskEngine->assessRisk($application);
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error("Failed to perform initial risk assessment for {$application->reference_number}: " . $e->getMessage());
         }

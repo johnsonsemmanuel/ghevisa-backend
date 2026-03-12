@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\Application;
 use App\Models\User;
 use App\Models\VisaType;
-use App\Services\RuleBasedRiskEngineService;
+use App\Services\Risk\RuleBasedRiskEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -13,12 +13,12 @@ class RiskScoringIntegrationTest extends TestCase
 {
     use RefreshDatabase;
 
-    protected RuleBasedRiskEngineService $riskEngine;
+    protected RuleBasedRiskEngine $riskEngine;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->riskEngine = app(RuleBasedRiskEngineService::class);
+        $this->riskEngine = app(RuleBasedRiskEngine::class);
     }
 
     /** @test */
