@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Analytics;
 
 use App\Jobs\SendNotification;
 use Illuminate\Support\Facades\DB;

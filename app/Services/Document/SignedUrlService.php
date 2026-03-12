@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Document;
 
 use App\Models\ApplicationDocument;
 use Illuminate\Support\Facades\Crypt;

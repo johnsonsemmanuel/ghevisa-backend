@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Security;
 
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\Cache;

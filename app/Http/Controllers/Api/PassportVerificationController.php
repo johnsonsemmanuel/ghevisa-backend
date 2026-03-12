@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\PassportVerificationService;
+use App\Services\Verification\PassportVerificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
