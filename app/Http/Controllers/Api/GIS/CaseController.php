@@ -8,7 +8,7 @@ use App\Models\ApplicationDocument;
 use App\Models\InternalNote;
 use App\Models\ReasonCode;
 use App\Services\ApplicationRoutingService;
-use App\Services\ApplicationService;
+use App\Services\Application\ApplicationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 

@@ -6,6 +6,7 @@ use App\Jobs\SendNotification;
 use App\Models\Application;
 use App\Models\ApplicationStatusHistory;
 use App\Models\User;
+use App\Services\Risk\RiskScoringOrchestrator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Request;
@@ -14,7 +15,7 @@ class ApplicationService
 {
     public function __construct(
         protected ApplicationRoutingService $routingService,
-        protected RiskScoringTriggerService $riskScoringTriggerService,
+        protected RiskScoringOrchestrator $riskScoringOrchestrator,
     ) {}
 
     /**
@@ -381,7 +382,7 @@ class ApplicationService
 
             // Trigger risk scoring when application moves to under_review
             if ($newStatus === 'under_review') {
-                $this->riskScoringTriggerService->onStatusChangeToInReview($application);
+                $this->riskScoringOrchestrator->onStatusChangeToInReview($application);
             }
 
             // Send appropriate notifications based on status change
