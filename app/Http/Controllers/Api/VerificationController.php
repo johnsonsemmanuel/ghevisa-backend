@@ -232,7 +232,8 @@ class VerificationController extends Controller
         }
 
         // CRITICAL: Passport binding - Visa must match passport number
-        if (strtoupper($application->passport_number) !== strtoupper($passportNumber)) {
+        $storedPassport = Crypt::decryptString($application->passport_number_encrypted);
+        if (strtoupper($storedPassport) !== strtoupper($passportNumber)) {
             \Log::warning('Visa passport binding failed', [
                 'visa_id' => $visaId,
                 'provided_passport' => substr($passportNumber, 0, 3) . '****',
@@ -245,9 +246,9 @@ class VerificationController extends Controller
             'type' => 'VISA',
             'reference_number' => $application->reference_number,
             'taid' => $application->taid,
-            'traveler_name' => $application->first_name . ' ' . $application->last_name,
-            'passport_number' => $application->passport_number,
-            'nationality' => $application->nationality,
+            'traveler_name' => Crypt::decryptString($application->first_name_encrypted) . ' ' . Crypt::decryptString($application->last_name_encrypted),
+            'passport_number' => $storedPassport,
+            'nationality' => Crypt::decryptString($application->nationality_encrypted),
             'status' => $application->status,
             'valid_until' => $application->decided_at?->addDays($application->visa_duration ?? 90)->format('Y-m-d'),
             'entry_type' => $application->entry_type ?? 'single',
@@ -273,7 +274,8 @@ class VerificationController extends Controller
         // Check visa applications
         $application = Application::where('taid', $taid)->first();
         if ($application) {
-            if (strtoupper($application->passport_number) === strtoupper($passportNumber)) {
+            $storedPassport = Crypt::decryptString($application->passport_number_encrypted);
+            if (strtoupper($storedPassport) === strtoupper($passportNumber)) {
                 return $this->verifyByVisaId($application->reference_number, $passportNumber);
             }
         }
@@ -301,14 +303,17 @@ class VerificationController extends Controller
             }
         }
 
-        // Check for active visa
-        $application = Application::whereIn('status', ['approved', 'issued'])
-            ->where('passport_number', $passportNumber)
-            ->where('nationality', $nationality)
-            ->first();
-
-        if ($application) {
-            return $this->verifyByVisaId($application->reference_number, $passportNumber);
+        // Check for active visa - must iterate through all since fields are encrypted
+        $applications = Application::whereIn('status', ['approved', 'issued'])->get();
+        
+        foreach ($applications as $application) {
+            $storedPassport = Crypt::decryptString($application->passport_number_encrypted);
+            $storedNationality = Crypt::decryptString($application->nationality_encrypted);
+            
+            if (strtoupper($storedPassport) === strtoupper($passportNumber) &&
+                strtoupper($storedNationality) === strtoupper($nationality)) {
+                return $this->verifyByVisaId($application->reference_number, $passportNumber);
+            }
         }
 
         return null;
@@ -449,8 +454,11 @@ class VerificationController extends Controller
         if (!$eta && !empty($validated['visa_id'])) {
             $application = Application::where('reference_number', $validated['visa_id'])->first();
             
-            if ($application && strtoupper($application->passport_number) !== strtoupper($validated['passport_number'])) {
-                return response()->json(['message' => 'Passport number does not match visa'], 403);
+            if ($application) {
+                $storedPassport = Crypt::decryptString($application->passport_number_encrypted);
+                if (strtoupper($storedPassport) !== strtoupper($validated['passport_number'])) {
+                    return response()->json(['message' => 'Passport number does not match visa'], 403);
+                }
             }
         }
 
