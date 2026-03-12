@@ -30,28 +30,106 @@ class ApplicationService
             'visa_channel'           => $data['visa_channel'] ?? 'e-visa',
             'entry_type'             => $data['entry_type'] ?? 'single',
             'service_tier_id'        => $data['service_tier_id'] ?? null,
+            
+            // Applicant Details (encrypted)
             'first_name_encrypted'   => $data['first_name'],
             'last_name_encrypted'    => $data['last_name'],
+            'other_names_encrypted'  => $data['other_names'] ?? null,
             'date_of_birth_encrypted'=> $data['date_of_birth'],
             'passport_number_encrypted' => $data['passport_number'],
             'nationality_encrypted'  => $data['nationality'],
             'email_encrypted'        => $data['email'],
             'phone_encrypted'        => $data['phone'] ?? null,
+            'profession_encrypted'   => $data['profession'] ?? null,
+            
+            // Non-encrypted fields
             'gender'                 => $data['gender'] ?? null,
             'marital_status'         => $data['marital_status'] ?? null,
-            'profession_encrypted'   => $data['profession'] ?? null,
             'country_of_birth'       => $data['country_of_birth'] ?? $data['place_of_birth'] ?? null,
+            'place_of_birth'         => $data['place_of_birth'] ?? null,
+            
+            // Passport Information
+            'passport_issuing_authority' => $data['passport_issuing_authority'] ?? null,
             'passport_issue_date'    => $data['passport_issue_date'] ?? null,
             'passport_expiry'        => $data['passport_expiry'] ?? null,
+            'passport_issue_place'   => $data['passport_issue_place'] ?? null,
+            'passport_near_expiry'   => $data['passport_near_expiry'] ?? false,
+            
+            // Contact Information
+            'phone_country'          => $data['phone_country'] ?? null,
+            
+            // Travel Details
             'intended_arrival'       => $data['intended_arrival'] ?? null,
             'duration_days'          => $data['duration_days'] ?? null,
+            'visa_duration'          => $data['visa_duration'] ?? null,
+            'port_of_entry'          => $data['port_of_entry'] ?? null,
+            'place_of_embarkation'   => $data['place_of_embarkation'] ?? null,
+            'destination_city'       => $data['destination_city'] ?? null,
             'address_in_ghana'       => $data['address_in_ghana'] ?? null,
             'purpose_of_visit'       => $data['purpose_of_visit'] ?? null,
-            'status'                 => 'draft',
+            'purpose_details'        => $data['purpose_details'] ?? null,
+            
+            // Travel History
+            'visited_ghana_before'   => $data['visited_ghana_before'] ?? false,
+            'previous_visa_number'   => $data['previous_visa_number'] ?? null,
+            'visited_other_countries' => $data['visited_other_countries'] ?? false,
+            'visited_country_1'      => $data['visited_country_1'] ?? null,
+            'visited_country_2'      => $data['visited_country_2'] ?? null,
+            'visited_country_3'      => $data['visited_country_3'] ?? null,
+            
+            // Accommodation
+            'accommodation_type'     => $data['accommodation_type'] ?? null,
+            'hotel_name'             => $data['hotel_name'] ?? null,
+            'hotel_booking_reference' => $data['hotel_booking_reference'] ?? null,
+            'accommodation_address'  => $data['accommodation_address'] ?? null,
+            'host_name'              => $data['host_name'] ?? null,
+            'host_phone'             => $data['host_phone'] ?? null,
+            'host_address'           => $data['host_address'] ?? null,
+            'host_relationship'      => $data['host_relationship'] ?? null,
+            
+            // Health Declaration
+            'health_infectious_travel' => $data['health_infectious_travel'] ?? false,
+            'health_infectious_countries' => $data['health_infectious_countries'] ?? null,
+            
+            // Security & Travel Declaration
+            'high_risk_travel'       => $data['high_risk_travel'] ?? false,
+            'entry_denied_before'    => $data['entry_denied_before'] ?? false,
+            'overstayed_before'      => $data['overstayed_before'] ?? false,
+            'international_sanctions' => $data['international_sanctions'] ?? false,
+            'criminal_conviction'    => $data['criminal_conviction'] ?? false,
+            
+            // Additional fields
+            'current_address'        => $data['current_address'] ?? null,
+            'city'                   => $data['city'] ?? null,
+            'state_province'         => $data['state_province'] ?? null,
+            'postal_code'            => $data['postal_code'] ?? null,
+            'country_of_residence'   => $data['country_of_residence'] ?? null,
+            'airline'                => $data['airline'] ?? null,
+            'flight_number'          => $data['flight_number'] ?? null,
+            'return_date'            => $data['return_date'] ?? null,
+            
+            // Employment
+            'occupation'             => $data['occupation'] ?? null,
+            'employer_name'          => $data['employer_name'] ?? null,
+            'employer_address'       => $data['employer_address'] ?? null,
+            'employer_phone'         => $data['employer_phone'] ?? null,
+            
+            // Business
+            'company_name'           => $data['company_name'] ?? null,
+            'company_address'        => $data['company_address'] ?? null,
+            'job_title'              => $data['job_title'] ?? null,
+            'host_company_name'      => $data['host_company_name'] ?? null,
+            'host_company_address'   => $data['host_company_address'] ?? null,
+            'host_contact_name'      => $data['host_contact_name'] ?? null,
+            'host_contact_phone'     => $data['host_contact_phone'] ?? null,
+            'business_purpose'       => $data['business_purpose'] ?? null,
+            'business_details'       => $data['business_details'] ?? null,
+            
+            'status'                 => 'pending_payment',
             'current_step'           => 1,
         ]);
 
-        $this->recordStatusChange($application, null, 'draft', 'Application created');
+        $this->recordStatusChange($application, null, 'pending_payment', 'Application created and awaiting payment');
 
         return $application;
     }
@@ -207,15 +285,26 @@ class ApplicationService
 
         return DB::transaction(function () use ($application) {
             $fromStatus = $application->status;
-            $application->status = 'paid_submitted';
+            
+            // First mark as submitted with payment
+            $application->status = 'submitted';
             if (!$application->submitted_at) {
                 $application->submitted_at = now();
             }
             $application->save();
 
-            $this->recordStatusChange($application, $fromStatus, 'paid_submitted', 'Payment confirmed');
+            $this->recordStatusChange($application, $fromStatus, 'submitted', 'Payment confirmed - Application submitted');
 
-            SendNotification::dispatch($application, 'status_changed', ['status' => 'paid_submitted']);
+            // Now route the application through CPH to assign to proper agency
+            $this->routingService->route($application);
+            $this->recordStatusChange($application, 'submitted', $application->status, "Routed to {$application->assigned_agency} as {$application->tier}");
+
+            // SECURITY FIX: Trigger Interpol check automatically (non-blocking)
+            $this->triggerInterpolCheckAsync($application);
+
+            // Send notifications
+            SendNotification::dispatch($application, 'application_submitted');
+            SendNotification::dispatch($application, 'new_application_assigned');
 
             return $application;
         });

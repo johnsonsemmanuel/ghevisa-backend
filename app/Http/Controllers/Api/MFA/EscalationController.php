@@ -7,7 +7,7 @@ use App\Models\Application;
 use App\Models\InternalNote;
 use App\Models\MfaMission;
 use App\Models\ReasonCode;
-use App\Services\ApplicationRoutingService;
+use App\Services\Application\ApplicationRoutingService;
 use App\Services\ApplicationService;
 use App\Services\EVisaPdfService;
 use Illuminate\Http\JsonResponse;
@@ -101,7 +101,7 @@ class EscalationController extends Controller
         ->orderByRaw("
             CASE 
                 WHEN sla_deadline IS NULL THEN 999999999
-                ELSE julianday(sla_deadline) - julianday('now')
+                ELSE TIMESTAMPDIFF(HOUR, NOW(), sla_deadline)
             END ASC
         ")
         ->orderByRaw("
@@ -272,7 +272,7 @@ class EscalationController extends Controller
         $validated = $request->validate([
             'reason_codes' => 'required|array|min:1',
             'reason_codes.*' => 'required|string|exists:reason_codes,code',
-            'notes' => 'required|string|max:2000',
+            'notes' => 'nullable|string|max:2000',
         ]);
 
         if ($denied = $this->ensureMissionAccess($request, $application)) return $denied;

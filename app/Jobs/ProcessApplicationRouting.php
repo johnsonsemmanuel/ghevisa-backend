@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Application;
-use App\Services\ApplicationRoutingService;
+use App\Services\Application\ApplicationRoutingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;

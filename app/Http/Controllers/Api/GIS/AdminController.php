@@ -92,7 +92,7 @@ class AdminController extends Controller
 
     public function applications(Request $request): JsonResponse
     {
-        $query = Application::with(['visaType', 'user:id,first_name,last_name,email'])
+        $query = Application::with(['visaType', 'user:id,first_name,last_name,email', 'payments'])
             ->where('assigned_agency', 'gis');
 
         if ($status = $request->query('status')) {

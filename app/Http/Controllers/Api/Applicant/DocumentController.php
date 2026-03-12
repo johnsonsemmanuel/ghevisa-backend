@@ -12,10 +12,10 @@ use Illuminate\Http\Request;
 class DocumentController extends Controller
 {
     public function __construct(
-        protected DocumentService $documentService,
-        protected \App\Services\OcrService $ocrService,
-        protected \App\Services\FileSecurityService $fileSecurityService,
-        protected \App\Services\VirusScanService $virusScanService, // SECURITY FIX HIGH-04
+        protected \App\Services\Document\DocumentService $documentService,
+        protected \App\Services\Document\OcrService $ocrService,
+        protected \App\Services\Document\FileSecurityService $fileSecurityService,
+        protected \App\Services\Document\VirusScanService $virusScanService, // SECURITY FIX HIGH-04
     ) {}
 
     /**

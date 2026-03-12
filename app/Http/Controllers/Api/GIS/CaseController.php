@@ -7,7 +7,7 @@ use App\Models\Application;
 use App\Models\ApplicationDocument;
 use App\Models\InternalNote;
 use App\Models\ReasonCode;
-use App\Services\ApplicationRoutingService;
+use App\Services\Application\ApplicationRoutingService;
 use App\Services\Application\ApplicationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,7 +31,7 @@ class CaseController extends Controller
                 'reviewingOfficer:id,first_name,last_name',
                 'approvalOfficer:id,first_name,last_name',
                 'riskAssessment',
-                'payment',
+                'payments',
             ]);
 
         if ($status = $request->query('status')) {
@@ -81,7 +81,7 @@ class CaseController extends Controller
         ->orderByRaw("
             CASE 
                 WHEN sla_deadline IS NULL THEN 999999999
-                ELSE julianday(sla_deadline) - julianday('now')
+                ELSE TIMESTAMPDIFF(HOUR, NOW(), sla_deadline)
             END ASC
         ")
         ->orderByRaw("
@@ -471,7 +471,7 @@ class CaseController extends Controller
         $validated = $request->validate([
             'reason_codes' => 'required|array|min:1',
             'reason_codes.*' => 'required|string|exists:reason_codes,code',
-            'notes' => 'required|string|max:2000',
+            'notes' => 'nullable|string|max:2000',
         ]);
 
         if ($application->assigned_agency !== 'gis') {
@@ -748,7 +748,7 @@ class CaseController extends Controller
             'application_ids.*' => 'integer|exists:applications,id',
             'reason_codes' => 'required|array|min:1',
             'reason_codes.*' => 'required|string|exists:reason_codes,code',
-            'notes' => 'required|string|max:2000',
+            'notes' => 'nullable|string|max:2000',
         ]);
 
         $applications = Application::whereIn('id', $validated['application_ids'])

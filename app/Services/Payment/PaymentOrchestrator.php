@@ -344,6 +344,8 @@ class PaymentOrchestrator
     {
         $payment = Payment::where('transaction_reference', $reference)
             ->orWhere('provider_reference', $reference)
+            ->orWhere('merchant_ref', $reference)
+            ->orWhere('checkout_id', $reference)
             ->first();
 
         if (!$payment) {
@@ -353,7 +355,7 @@ class PaymentOrchestrator
         if ($payment->status === 'completed') {
             // Ensure onPaymentSuccess was called for proper routing
             // This handles cases where payment was completed but application wasn't routed
-            if ($payment->application && in_array($payment->application->status, ['paid_submitted', 'submitted_awaiting_payment', 'pending_payment', 'draft'])) {
+            if ($payment->application && in_array($payment->application->status, ['submitted_awaiting_payment', 'pending_payment'])) {
                 $this->onPaymentSuccess($payment);
             }
             return ['success' => true, 'status' => 'completed', 'payment' => $payment];
@@ -363,6 +365,7 @@ class PaymentOrchestrator
         return match ($payment->payment_provider) {
             'paystack' => $this->verifyPaystack($reference, $payment),
             'stripe' => $this->verifyStripe($reference, $payment),
+            'gcb', 'gcb_test' => $this->verifyGcb($reference, $payment),
             'bank_transfer' => ['success' => true, 'status' => $payment->status, 'payment' => $payment],
             default => ['success' => false, 'status' => 'unknown_provider'],
         };
@@ -397,9 +400,18 @@ class PaymentOrchestrator
                         'provider_reference' => $data['reference'],
                     ]);
 
+                    Log::info('Calling onPaymentSuccess for Paystack payment', [
+                        'payment_id' => $payment->id,
+                        'application_id' => $payment->application_id,
+                        'application_status_before' => $payment->application->status ?? 'unknown',
+                    ]);
+
                     $this->onPaymentSuccess($payment);
 
-                    Log::info('Paystack payment verified successfully', ['payment_id' => $payment->id]);
+                    Log::info('Paystack payment verified successfully', [
+                        'payment_id' => $payment->id,
+                        'application_status_after' => $payment->application->fresh()->status ?? 'unknown',
+                    ]);
                     return ['success' => true, 'status' => 'completed', 'payment' => $payment->fresh()];
                 }
                 
@@ -410,6 +422,69 @@ class PaymentOrchestrator
             return ['success' => false, 'status' => $payment->status];
         } catch (\Exception $e) {
             Log::error('Paystack verify error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return ['success' => false, 'status' => 'verification_failed'];
+        }
+    }
+
+    /**
+     * Verify GCB payment.
+     */
+    protected function verifyGcb(string $reference, Payment $payment): array
+    {
+        try {
+            Log::info('GCB verification starting', ['reference' => $reference, 'payment_id' => $payment->id]);
+            
+            // For test mode, simulate successful payment
+            if ($payment->payment_provider === 'gcb_test') {
+                Log::info('GCB test mode verification - simulating success');
+                
+                $payment->update([
+                    'status' => 'completed',
+                    'paid_at' => now(),
+                    'provider_reference' => $reference,
+                ]);
+
+                $this->onPaymentSuccess($payment);
+
+                Log::info('GCB test payment verified successfully', ['payment_id' => $payment->id]);
+                return ['success' => true, 'status' => 'completed', 'payment' => $payment->fresh()];
+            }
+
+            // For production GCB, use the GCB provider to check status
+            $gcbProvider = app(\App\Services\Payment\Providers\GcbProvider::class);
+            $result = $gcbProvider->checkTransactionStatus($payment->checkout_id ?? $reference);
+
+            if ($result['success'] && isset($result['status'])) {
+                $mappedStatus = $gcbProvider->mapStatusCode($result['status']);
+                
+                if ($mappedStatus === 'completed') {
+                    $payment->update([
+                        'status' => 'completed',
+                        'paid_at' => now(),
+                        'provider_reference' => $result['transactionId'] ?? $reference,
+                        'gateway_response' => array_merge($payment->gateway_response ?? [], $result),
+                    ]);
+
+                    $this->onPaymentSuccess($payment);
+
+                    Log::info('GCB payment verified successfully', ['payment_id' => $payment->id]);
+                    return ['success' => true, 'status' => 'completed', 'payment' => $payment->fresh()];
+                } else {
+                    // Update payment status but don't mark as completed
+                    $payment->update([
+                        'status' => $mappedStatus,
+                        'gateway_response' => array_merge($payment->gateway_response ?? [], $result),
+                    ]);
+                    
+                    Log::info('GCB payment status updated', ['payment_id' => $payment->id, 'status' => $mappedStatus]);
+                    return ['success' => false, 'status' => $mappedStatus, 'payment' => $payment->fresh()];
+                }
+            }
+
+            Log::warning('GCB verification failed', ['result' => $result]);
+            return ['success' => false, 'status' => $payment->status];
+        } catch (\Exception $e) {
+            Log::error('GCB verify error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return ['success' => false, 'status' => 'verification_failed'];
         }
     }
@@ -481,7 +556,7 @@ class PaymentOrchestrator
         // Store total fee
         $application->update(['total_fee' => $payment->amount]);
 
-        $applicationService = app(ApplicationService::class);
+        $applicationService = app(\App\Services\Application\ApplicationService::class);
 
         // Use centralized ApplicationService for proper status transition + audit trail
         if (in_array($application->status, ['submitted_awaiting_payment', 'pending_payment'])) {
@@ -489,25 +564,12 @@ class PaymentOrchestrator
             $application->refresh();
         }
 
-        // After payment confirmation, submit the application for routing to GIS/MFA
-        if ($application->status === 'paid_submitted') {
-            try {
-                $applicationService->submit($application);
-                Log::info('Application automatically submitted after payment', [
-                    'application_id' => $application->id,
-                    'reference' => $application->reference_number,
-                    'new_status' => $application->fresh()->status,
-                    'assigned_to' => $application->fresh()->assigned_agency,
-                ]);
-            } catch (\Exception $e) {
-                Log::error('Failed to submit application after payment', [
-                    'application_id' => $application->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        Log::info("Payment completed for application {$application->reference_number}");
+        // After payment confirmation, the application is now under review
+        // No need to submit again as it's already in the correct status
+        Log::info("Payment completed for application {$application->reference_number}", [
+            'application_id' => $application->id,
+            'new_status' => $application->status,
+        ]);
     }
 
     /**
@@ -545,7 +607,7 @@ class PaymentOrchestrator
         }
         
         // For other currencies, use the pricing service
-        $pricingService = app(\App\Services\PricingService::class);
+        $pricingService = app(\App\Services\Integration\PricingService::class);
         $pricing = $pricingService->calculatePrice($application);
         
         $amountUsd = $pricing['total'];
@@ -563,5 +625,154 @@ class PaymentOrchestrator
     protected function generateReference(Application $application, string $prefix): string
     {
         return $prefix . '-' . $application->reference_number . '-' . Str::random(6);
+    }
+
+    /**
+     * Handle webhook from payment provider.
+     */
+    public function handleWebhook(array $payload, string $provider): bool
+    {
+        try {
+            Log::info('Processing payment webhook', [
+                'provider' => $provider,
+                'event' => $payload['event'] ?? 'unknown',
+                'data' => $payload['data'] ?? [],
+            ]);
+
+            if ($provider === 'paystack') {
+                return $this->handlePaystackWebhook($payload);
+            }
+
+            if ($provider === 'stripe') {
+                return $this->handleStripeWebhook($payload);
+            }
+
+            Log::warning('Unknown webhook provider', ['provider' => $provider]);
+            return false;
+        } catch (\Exception $e) {
+            Log::error('Webhook processing error', [
+                'provider' => $provider,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Handle Paystack webhook.
+     */
+    protected function handlePaystackWebhook(array $payload): bool
+    {
+        $event = $payload['event'] ?? '';
+        $data = $payload['data'] ?? [];
+
+        // Only process charge.success events
+        if ($event !== 'charge.success') {
+            Log::info('Ignoring Paystack webhook event', ['event' => $event]);
+            return true;
+        }
+
+        $reference = $data['reference'] ?? null;
+        if (!$reference) {
+            Log::warning('Paystack webhook missing reference', ['data' => $data]);
+            return false;
+        }
+
+        // Find payment by reference
+        $payment = Payment::where('transaction_reference', $reference)
+            ->orWhere('provider_reference', $reference)
+            ->first();
+
+        if (!$payment) {
+            Log::warning('Payment not found for Paystack webhook', ['reference' => $reference]);
+            return false;
+        }
+
+        // If payment is already completed, skip processing
+        if ($payment->status === 'completed') {
+            Log::info('Payment already completed, skipping webhook', ['payment_id' => $payment->id]);
+            return true;
+        }
+
+        // Verify payment status
+        if ($data['status'] === 'success') {
+            $payment->update([
+                'status' => 'completed',
+                'paid_at' => now(),
+                'provider_reference' => $reference,
+                'gateway_response' => $data,
+            ]);
+
+            $this->onPaymentSuccess($payment);
+
+            Log::info('Paystack webhook processed successfully', [
+                'payment_id' => $payment->id,
+                'reference' => $reference,
+            ]);
+
+            return true;
+        }
+
+        Log::warning('Paystack webhook payment not successful', [
+            'reference' => $reference,
+            'status' => $data['status'] ?? 'unknown',
+        ]);
+
+        return false;
+    }
+
+    /**
+     * Handle Stripe webhook.
+     */
+    protected function handleStripeWebhook(array $payload): bool
+    {
+        $event = $payload['type'] ?? '';
+        $data = $payload['data']['object'] ?? [];
+
+        // Only process checkout.session.completed events
+        if ($event !== 'checkout.session.completed') {
+            Log::info('Ignoring Stripe webhook event', ['event' => $event]);
+            return true;
+        }
+
+        $sessionId = $data['id'] ?? null;
+        $clientReferenceId = $data['client_reference_id'] ?? null;
+
+        if (!$clientReferenceId) {
+            Log::warning('Stripe webhook missing client_reference_id', ['data' => $data]);
+            return false;
+        }
+
+        // Find payment by reference
+        $payment = Payment::where('transaction_reference', $clientReferenceId)->first();
+
+        if (!$payment) {
+            Log::warning('Payment not found for Stripe webhook', ['reference' => $clientReferenceId]);
+            return false;
+        }
+
+        // If payment is already completed, skip processing
+        if ($payment->status === 'completed') {
+            Log::info('Payment already completed, skipping webhook', ['payment_id' => $payment->id]);
+            return true;
+        }
+
+        // Update payment status
+        $payment->update([
+            'status' => 'completed',
+            'paid_at' => now(),
+            'provider_reference' => $sessionId,
+            'gateway_response' => $data,
+        ]);
+
+        $this->onPaymentSuccess($payment);
+
+        Log::info('Stripe webhook processed successfully', [
+            'payment_id' => $payment->id,
+            'reference' => $clientReferenceId,
+        ]);
+
+        return true;
     }
 }
