@@ -47,6 +47,16 @@ Route::prefix('eligibility')->group(function () {
 // Payment webhook (no auth — verified via provider signature)
 Route::post('/webhooks/payment', [WebhookController::class, 'handlePayment'])->middleware('throttle:60,1');
 
+// Public health check endpoint
+Route::get('/health', function () {
+    return response()->json([
+        'status' => 'healthy',
+        'timestamp' => now()->toISOString(),
+        'version' => '1.5.0',
+        'environment' => app()->environment(),
+    ]);
+});
+
 // GCB Payment Gateway callback (called by GCB server)
 Route::post('/gcb/callback', [\App\Http\Controllers\Api\GcbPaymentController::class, 'callback'])->middleware('throttle:60,1');
 
